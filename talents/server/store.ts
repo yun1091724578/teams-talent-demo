@@ -14,6 +14,17 @@ export async function atomicText(path: string, value: string) {
 }
 export async function atomicJson(path: string, value: unknown) { await atomicText(path, JSON.stringify(value, null, 2) + '\n'); }
 
+/** Seed artifacts renamed after demo data was stored: index artifacts are named for what they are, and the project
+ *  document set is 设计文档 as in Teams. An artifact still carrying an old seed name takes the current name and description. */
+const RENAMED: Record<string, { from: string[]; name: string; desc: string }> = {
+  'a-cg-java': { from: ['carddemo-java-1025 CodeGraph'], name: 'carddemo-java-1025 代码图谱', desc: '查询 carddemo-java-1025 中类、方法的定义与调用关系。' },
+  'a-docidx': { from: ['信用卡营销交付文档 RAG 检索', '信用卡营销交付文档检索索引'], name: '设计文档检索索引', desc: '按问题检索设计文档中的相关段落。' },
+};
+const renamed = (a: TalentsState['artifacts'][number]) => {
+  const r = RENAMED[a.id];
+  return r?.from.includes(a.name) ? { ...a, name: r.name, desc: r.desc } : a;
+};
+
 /** Talents-owned state in <state dir>/state.json. Every change is revision-checked and written atomically. */
 export class Store {
   state!: TalentsState;
@@ -23,7 +34,12 @@ export class Store {
     let stored: TalentsState | null = null;
     try { stored = JSON.parse(await readFile(this.path, 'utf8')); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-    if (stored && stored.schemaVersion === 1 && stored.seedVersion === SEED_VERSION && Number.isInteger(stored.revision) && Array.isArray(stored.artifacts)) { this.state = stored; return; }
+    if (stored && stored.schemaVersion === 1 && stored.seedVersion === SEED_VERSION && Number.isInteger(stored.revision) && Array.isArray(stored.artifacts)) {
+      // Categories and built-in capabilities describe what Talents offers, not demo progress: always take the
+      // current ones. Capabilities imported during the demo are kept.
+      const { categories, capabilities } = seedState();
+      this.state = { ...stored, categories, capabilities: [...capabilities, ...(stored.capabilities ?? []).filter(c => c.custom)], artifacts: stored.artifacts.map(renamed) }; return;
+    }
     if (stored) {
       // Demo data from an older seed: keep a copy, then start from the current seed.
       const backup = this.path.replace(/\.json$/, '') + '.seed-' + (stored.seedVersion ?? 'unknown') + '.json';
