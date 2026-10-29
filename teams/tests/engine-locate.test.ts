@@ -59,3 +59,20 @@ test('a probe failure is failed and a missing native environment keeps the locat
     assert.ok(fallback.engine.notes?.some(note => note.includes('平台默认位置')));
   } finally { await done(); }
 });
+
+test('a launcher found through PATH is located without an official install', async () => {
+  const { root, done } = await fixture();
+  try {
+    const tools = join(root, 'shims'), entry = join(tools, 'icode.exe');
+    await file(entry);
+    const result = await locateChrysEngine({
+      platform: 'win32', env: { LOCALAPPDATA: join(root, 'local'), APPDATA: join(root, 'roaming'), PATH: tools }, home: root, materialRoot: root,
+      probe: async () => '0.32.1',
+      environment: async () => ({ configDirectory: join(root, 'roaming', 'chrys'), sessionRoot: join(root, 'roaming', 'chrys', 'sessions') }),
+    });
+    assert.equal(result.engine.state, 'ready');
+    assert.equal(result.engine.entry, entry);
+    assert.equal(result.engine.version, '0.32.1');
+    assert.equal(result.engine.config, join(root, 'roaming', 'chrys'));
+  } finally { await done(); }
+});

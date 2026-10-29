@@ -9,6 +9,12 @@ import {assignDeliveryRequirement,deliveryRequirement} from '../src/delivery-req
 import {mainTask,taskAutomation} from '../src/task-automation.js';
 import {readFixtures} from '../server/http-shared.js';
 
+/** Wait for an asynchronous effect instead of guessing a sleep duration under load. */
+async function eventually(check:()=>boolean,timeoutMs=2000){
+ const deadline=Date.now()+timeoutMs;
+ while(!check()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+}
+
 // Explicit preparation of the old MKT-001 record; no native transport/model is invoked.
 test('explicit pristine main-task preparation is actor scoped and concurrently idempotent; read/startup does not queue it',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'confirm-main-')),store=new Store(join(dir,'state.json'));await store.init();
@@ -19,7 +25,7 @@ test('explicit pristine main-task preparation is actor scoped and concurrently i
   service.resumeQueued();assert.equal(JSON.stringify(store.state),before);assert.equal(taskAutomation(store.state,mainTask)?.preparation,undefined);
   await assert.rejects(service.retry('owner',mainTask),/当前交付人/);assert.equal(JSON.stringify(store.state),before);
   await Promise.all([service.retry('member',mainTask),service.retry('member',mainTask)]);
-  const job=taskAutomation(store.state,mainTask)!.preparation!;const id=job.id;await new Promise(resolve=>setTimeout(resolve,20));assert.equal(delays,1);assert.equal(store.state.audit.filter(item=>item.action==='确认准备 iCode 会话').length,1);assert.equal(taskAutomation(store.state,mainTask)!.preparation!.id,id);
+  const job=taskAutomation(store.state,mainTask)!.preparation!;const id=job.id;await eventually(()=>delays===1);assert.equal(delays,1);assert.equal(store.state.audit.filter(item=>item.action==='确认准备 iCode 会话').length,1);assert.equal(taskAutomation(store.state,mainTask)!.preparation!.id,id);
   const task=deliveryRequirement(store.state,mainTask.projectId,mainTask.taskId)!;assert.equal(task.preparedAt,undefined);assert.equal(task.stage,'preparing');assert.ok(Object.values(task.nodes).every(node=>node.status==='pending'));
   release();await service.schedule(mainTask,true);assert.equal(taskAutomation(store.state,mainTask)!.preparation!.status,'failed');assert.equal(taskAutomation(store.state,mainTask)!.preparation!.session,undefined);
  }finally{release?.();await rm(dir,{recursive:true,force:true});}

@@ -12,6 +12,14 @@ import type {TaskArtifactQuery} from '../src/task-artifact-content.js';
 import {readTaskArtifactContent} from '../server/task-artifact-content.js';
 import {registerTaskArtifactRoot,readTaskArtifactRoots} from '../scripts/lib/task-artifact-roots.mjs';
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
+/** Creating a link needs Developer Mode or SeCreateSymbolicLinkPrivilege on Windows; junctions do not. */
+async function canCreateFileLinks(){
+ const dir=await mkdtemp(join(tmpdir(),'artifact-link-probe-'));
+ try{const target=join(dir,'target'),link=join(dir,'link');await writeFile(target,'probe');await symlink(target,link);return true;}
+ catch{return false;}
+ finally{await rm(dir,{recursive:true,force:true});}
+}
+const fileLinks=await canCreateFileLinks();
 async function fixture(){
  const temp=await realpath(await mkdtemp(join(tmpdir(),'artifact-read-'))),teamsRoot=join(temp,'teams'),runtime=join(temp,'runtime'),directory=join(temp,'task'),reports=join(teamsRoot,'test-results','batch','task-runtime');
  await Promise.all([mkdir(runtime),mkdir(directory),mkdir(reports,{recursive:true})]);
@@ -40,6 +48,11 @@ test('declared content hash is enforced; binary, large files and symlinks fail e
   await writeFile(f.path,'\0');await assert.rejects(readTaskArtifactContent(f.state,'owner',f.query,f.options),/二进制/);
   await writeFile(f.path,Buffer.alloc(1024*1024+1));await assert.rejects(readTaskArtifactContent(f.state,'owner',f.query,f.options),/1 MiB/);
   const outside=join(f.temp,'secret.md');await writeFile(outside,'outside');f.event.evidence[0].value=outside;await assert.rejects(readTaskArtifactContent(f.state,'owner',f.query,f.options),/不在任务/);
+ }finally{await f.clean();}
+});
+test('an artifact path that is a symbolic link is rejected',{skip:fileLinks?false:'当前账户无法创建文件符号链接（Windows 需要开发者模式或 SeCreateSymbolicLinkPrivilege）'},async()=>{
+ const f=await fixture();try{
+  const outside=join(f.temp,'secret.md');await writeFile(outside,'outside');
   const link=join(f.directory,'link.md');await symlink(outside,link);f.event.evidence[0].value=link;await assert.rejects(readTaskArtifactContent(f.state,'owner',f.query,f.options),/符号链接/);
  }finally{await f.clean();}
 });
@@ -52,8 +65,16 @@ test('local registry is explicit, atomic/idempotent, scoped and rejects overlap/
   assert.equal((await readTaskArtifactContent(f.state,'owner',f.query,f.options)).content,'actual report');
   await assert.rejects(registerTaskArtifactRoot({...registration,taskId:'MKT-OTHER'}),/重叠/);
   await assert.rejects(registerTaskArtifactRoot({...registration,directory:f.temp}),/专属子目录/);
-  const link=join(f.options.teamsRoot,'test-results','link');await symlink(f.reports,link);await assert.rejects(registerTaskArtifactRoot({...registration,directory:link}),/符号链接/);
   await writeFile(join(f.options.runtime,'task-artifact-roots.json'),'{broken');await assert.rejects(readTaskArtifactRoots({...registration}),/JSON/);
+ }finally{await f.clean();}
+});
+test('a registry directory that is a link is rejected',async()=>{
+ const f=await fixture();try{
+  const registration={...f.options,projectId:f.query.projectId,taskId:f.query.taskId,directory:f.reports};
+  const link=join(f.options.teamsRoot,'test-results','link');
+  // A junction is the same reparse-point check but needs no extra Windows privilege.
+  if(process.platform==='win32')await symlink(f.reports,link,'junction');else await symlink(f.reports,link);
+  await assert.rejects(registerTaskArtifactRoot({...registration,directory:link}),/符号链接/);
  }finally{await f.clean();}
 });
 test('historical tracked document reads exact reachable commit, not newer working file or another branch',async()=>{

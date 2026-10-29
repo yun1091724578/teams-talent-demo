@@ -51,8 +51,8 @@ export async function readTaskArtifactContent(state:DemoState,role:Role,query:Ta
  // A codeVersion may identify a historical design file: read that exact reachable commit, never relabel HEAD bytes.
  if(bound&&bound===root&&evidence.codeVersion){
   if(!/^[a-f\d]{40}$/i.test(evidence.codeVersion))fail('产物代码版本不是完整提交 SHA');
-  await exec('git',['-C',bound,'merge-base','--is-ancestor',evidence.codeVersion,'HEAD']).catch(()=>fail('产物代码版本不属于本任务工作树历史'));
-  const {stdout:top}=await exec('git',['-C',bound,'rev-parse','--show-toplevel']);const repo=await realpath(top.trim());
+  await exec('git',['-C',bound,'merge-base','--is-ancestor',evidence.codeVersion,'HEAD'],{windowsHide:true}).catch(()=>fail('产物代码版本不属于本任务工作树历史'));
+  const {stdout:top}=await exec('git',['-C',bound,'rev-parse','--show-toplevel'],{windowsHide:true});const repo=await realpath(top.trim());
   if(repo!==bound&&!contained(repo,bound))fail('业务绑定目录不在已核验工作树内',403);
   const gitPath=relative(repo,path).split('\\').join('/');
   const result=await exec('git',['-C',bound,'show',`${evidence.codeVersion}:${gitPath}`],{encoding:'buffer',maxBuffer:MAX_BYTES,windowsHide:true}).catch(()=>fail('无法读取此提交中的已登记文档版本'));

@@ -16,6 +16,20 @@ export interface PreparationInput {
   env: NodeJS.ProcessEnv;
 }
 async function optional(path: string) { try { return JSON.parse(await readFile(path, 'utf8')); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; } }
+const readNotices = /^\[(?:Truncated |Long lines truncated|Showing lines )/;
+const partialLine = '... [truncated]';
+/** iCode caps very long lines in multi-line reads and documents the single-line recovery. */
+function readRows(result: string, path: string) {
+  const rows: Array<{ line: number; text: string; partial: boolean }> = [];
+  for (const row of result.replace(/\r\n?/g, '\n').split('\n').slice(1)) {
+    if (!row || readNotices.test(row)) continue;
+    const match = /^(\d+)\|(.*)$/.exec(row);
+    if (!match) throw new Error('材料读取格式无效：' + path);
+    const partial = match[2].endsWith(partialLine);
+    rows.push({ line: Number(match[1]), text: partial ? match[2].slice(0, -partialLine.length) : match[2], partial });
+  }
+  return rows;
+}
 /** Validate native-visible tool calls and matching successful tool results. Never read reasoning text. */
 export function preparationReadingEvidence(envelope: any, reads: Array<Reading & { content?: string }>) {
   const contents = (envelope.state?.messages ?? []).flatMap((message: any) => message.contents ?? []);
@@ -23,18 +37,32 @@ export function preparationReadingEvidence(envelope: any, reads: Array<Reading &
   if (calls.some((call: any) => call.name !== 'read_file')) throw new Error('初始化使用了只读材料读取以外的工具，未标记会话已准备');
   const results = new Map<string, any>(contents.filter((part: any) => part.type === 'function_result').map((part: any) => [part.call_id, part]));
   return reads.map(read => {
-    const call = calls.find((call: any) => {
+    const matches = calls.filter((call: any) => {
       const arguments_ = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : call.arguments;
-      return arguments_?.path && resolve(arguments_.path) === resolve(read.path) && arguments_.start_line === undefined && arguments_.end_line === undefined;
+      return arguments_?.path && resolve(arguments_.path) === resolve(read.path);
     });
-    const result = call && results.get(call.call_id);
-    if (!call || !result || result.is_error || result.error || typeof result.result !== 'string' || !result.result.startsWith('File: ')) throw new Error('缺少完整材料的真实读取回执：' + read.path);
+    if (!matches.length) throw new Error('缺少完整材料的真实读取回执：' + read.path);
+    const readable = matches.filter((call: any) => {
+      const result = results.get(call.call_id);
+      return result && !result.is_error && !result.error && typeof result.result === 'string' && result.result.startsWith('File: ');
+    });
+    if (!readable.length) throw new Error('缺少完整材料的真实读取回执：' + read.path);
     if(read.content!==undefined){
-      const rows=result.result.split('\n').slice(1);if(rows.at(-1)==='')rows.pop();
-      const lines=rows.map((row:string,index:number)=>{const match=/^(\d+)\|(.*)$/.exec(row);if(!match||Number(match[1])!==index+1)throw new Error('材料读取被截断或缺行：'+read.path);return match[2];});
-      if(lines.join('\n')!==read.content.replaceAll('\r\n','\n').replace(/\n$/,''))throw new Error('材料读取结果与实际版本不一致：'+read.path);
+      // A multi-line read truncates long lines; the tool documents reading each of them
+      // with offset/limit. Verify the union: every line must be present exactly once.
+      const collected = new Map<number, { text: string; partial: boolean }>();
+      for (const call of readable) {
+        for (const row of readRows(results.get(call.call_id).result, read.path)) {
+          const prior = collected.get(row.line);
+          if (!prior || prior.partial && !row.partial) { collected.set(row.line, { text: row.text, partial: row.partial }); continue; }
+          if (!row.partial && prior.text !== row.text) throw new Error('材料读取结果与实际版本不一致：' + read.path);
+        }
+      }
+      const expected=read.content.replace(/\r\n?/g,'\n').replace(/\n$/,'').split('\n');
+      for(const [index,line] of expected.entries()){const row=collected.get(index+1);if(!row||row.partial)throw new Error('材料读取被截断或缺行：'+read.path);if(row.text!==line)throw new Error('材料读取结果与实际版本不一致：'+read.path);}
+      if([...collected.keys()].some(line=>line<1||line>expected.length))throw new Error('材料读取结果与实际版本不一致：'+read.path);
     }
-    return { path:read.path,sha256:read.sha256,callId: String(call.call_id) };
+    return { path:read.path,sha256:read.sha256,callId: String(readable[0].call_id) };
   });
 }
 export async function verifiedPreparation(input: PreparationInput): Promise<NativePreparationReceipt | null> {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { nativeConfigRoot, nativeSessionsRoot, officialICodePaths, resolveICodeBinary } from '../server/icode-binary.js';
+import { nativeConfigRoot, nativeInterpreters, nativeSessionsRoot, officialICodePaths, resolveICodeBinary, selectICodeBinary } from '../server/icode-binary.js';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'icode-binary-'));
@@ -87,5 +87,100 @@ test('native configuration and session roots follow the platform contract', asyn
     const posix = { platform: 'linux' as const, env: {}, home: root };
     assert.equal(nativeConfigRoot(posix), join(root, '.chrys'));
     assert.equal(nativeSessionsRoot(posix), join(root, '.chrys', 'sessions'));
+  } finally { await done(); }
+});
+
+const windowsEnv = (root: string, extra: NodeJS.ProcessEnv = {}) => ({ LOCALAPPDATA: join(root, 'local'), APPDATA: join(root, 'roaming'), ...extra });
+
+test('a launcher outside the official location is found through PATH', async () => {
+  const { root, done } = await fixture();
+  try {
+    const tools = join(root, 'shims'), entry = join(tools, 'icode.exe');
+    await file(entry);
+    const resolved = resolveICodeBinary({ platform: 'win32', env: windowsEnv(root, { PATH: [join(root, 'empty'), tools].join(';') }), home: root, materialRoot: root });
+    assert.equal(resolved.path, entry);
+    assert.equal(resolved.source, 'path');
+    assert.ok(resolved.notes.some(note => note.includes('官方安装位置')));
+  } finally { await done(); }
+});
+
+test('a uv tool receipt contributes the launcher it actually installed, and stale receipts are reported', async () => {
+  const { root, done } = await fixture();
+  try {
+    const roaming = join(root, 'roaming'), tool = join(roaming, 'uv', 'tools', 'icode-tui');
+    const shim = join(root, '.local', 'bin', 'icode.exe');
+    await file(shim);
+    await mkdir(tool, { recursive: true });
+    await writeFile(join(tool, 'uv-receipt.toml'), `[tool]\nrequirements = [{ name = "icode-tui" }]\nentrypoints = [\n    { name = "icode", install-path = "${shim}", from = "icode-tui" },\n]\n`);
+    const resolved = resolveICodeBinary({ platform: 'win32', env: windowsEnv(root, { PATH: '' }), home: root, materialRoot: root });
+    assert.equal(resolved.path, shim);
+    assert.equal(resolved.source, 'uv');
+
+    const stale = join(root, 'missing', 'chrys.exe');
+    await writeFile(join(tool, 'uv-receipt.toml'), `entrypoints = [{ name = "chrys", install-path = "${stale}" }]\n`);
+    const broken = resolveICodeBinary({ platform: 'win32', env: windowsEnv(root, { PATH: '' }), home: root, materialRoot: root });
+    assert.equal(broken.source, 'missing');
+    assert.ok(broken.notes.some(note => note.includes('uv 安装回执指向的 iCode 不存在')));
+  } finally { await done(); }
+});
+
+test('the same launcher reached through a receipt and PATH is one installation', async () => {
+  const { root, done } = await fixture();
+  try {
+    const roaming = join(root, 'roaming'), tool = join(roaming, 'uv', 'tools', 'icode-tui');
+    const shim = join(root, '.local', 'bin', 'icode.exe');
+    await file(shim);
+    await mkdir(tool, { recursive: true });
+    await writeFile(join(tool, 'uv-receipt.toml'), `entrypoints = [{ name = "icode", install-path = "${shim}" }]\n`);
+    const resolved = resolveICodeBinary({ platform: 'win32', env: windowsEnv(root, { PATH: join(root, '.local', 'bin') }), home: root, materialRoot: root });
+    assert.equal(resolved.candidates.length, 1);
+    assert.equal(resolved.source, 'uv');
+  } finally { await done(); }
+});
+
+test('selection skips a launcher that cannot report a version and keeps the next one', async () => {
+  const { root, done } = await fixture();
+  try {
+    const tools = join(root, 'shims'), first = join(tools, 'icode.exe'), second = join(tools, 'chrys.exe');
+    await file(first);
+    await file(second);
+    const tried: string[] = [];
+    const selection = await selectICodeBinary({
+      platform: 'win32', env: windowsEnv(root, { PATH: tools }), home: root, materialRoot: root,
+      probe: async entry => { tried.push(entry); if (entry === first) throw new Error('broken shim'); return 'iCode 0.32.1'; },
+    });
+    assert.deepEqual(tried, [first, second]);
+    assert.equal(selection.status, 'ready');
+    assert.equal(selection.path, second);
+    assert.equal(selection.version, '0.32.1');
+    assert.ok(selection.notes.some(note => note.includes('broken shim')));
+  } finally { await done(); }
+});
+
+test('a broken explicit override is reported instead of replaced by the PATH install', async () => {
+  const { root, done } = await fixture();
+  try {
+    const tools = join(root, 'shims');
+    await file(join(tools, 'icode.exe'));
+    const missing = join(root, 'pinned', 'icode.exe');
+    const selection = await selectICodeBinary({
+      platform: 'win32', env: windowsEnv(root, { DEMO_ICODE_BINARY: missing, PATH: tools }), home: root, materialRoot: root,
+      probe: async () => '0.32.1',
+    });
+    assert.equal(selection.status, 'override-missing');
+    assert.equal(selection.path, missing);
+    assert.equal(selection.version, undefined);
+  } finally { await done(); }
+});
+
+test('the native interpreter is derived from the uv tool that owns the launcher', async () => {
+  const { root, done } = await fixture();
+  try {
+    const roaming = join(root, 'roaming'), tool = join(roaming, 'uv', 'tools', 'icode-tui');
+    const shim = join(root, '.local', 'bin', 'icode.exe'), python = join(tool, 'Scripts', 'python.exe');
+    await file(shim);
+    await file(python);
+    await writeFile(join(tool, 'uv-receipt.toml'), `entrypoints = [{ name = "icode", install-path = "${shim}" }]\n`);
+    assert.deepEqual(nativeInterpreters(shim, { platform: 'win32', env: windowsEnv(root, { PATH: '' }), home: root }), [python]);
   } finally { await done(); }
 });

@@ -18,7 +18,7 @@ import { prepareNativeSession, type PreparationInput } from './native-session-pr
 import type { NativePreparationResult } from '../src/native-preparation.js';
 import { taskAutomation, taskNodeKnowledge, type KnowledgeNode, type TaskScope } from '../src/task-automation.js';
 import { projectMembers } from '../src/teams-domain.js';
-import { binary } from './config.js';
+import { binary, selectICode } from './config.js';
 import { nativeTraceEnvironment } from '../scripts/native/tui-trace.mjs';
 import { readNativeTuiEnvelope } from './task-session-documents.js';
 import { nativeProcessActive, inspectNativeProcess } from '../scripts/native/session-liveness.mjs';
@@ -143,13 +143,14 @@ export class ProjectWorkService {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       const context = projectModelContext(await collaborationContext(this.current(),this.data,target));
       await atomicJson(contextPath,context);
-      const prompt = `# Teams 会话初始化：${task.title}\n项目 ${scope.projectId}；任务 ${scope.taskId}；节点 prepare（需求澄清）；初始化 ${preparationId}。\n\n本轮仅为开发者准备会话。你必须先用 read_file 完整读取以下两个文件；每次明确指定 line_range=[1,-1] 与 max_tokens=120000，以免长 JSON 行或 Skill 正文被默认截断：\n1. ${collaborationSkillPath}\n2. ${contextPath}\n\n本轮的限制优先于所读 Skill 中的执行步骤：只允许 read_file 工具读取材料，不运行 shell、写文件、修改代码、创建PRD、调用Teams CLI写操作、inputs adopt、progress add、result submit、验收或切换节点。不要创建todo或委派Agent。不要把需求、采用依据、PRD或检查标记为已确认。需求、知识与 Skill 以结构化上下文中的当前节点版本为准；contentRef 指向同文档正文，references.absolutePath 指向带 SHA256/版本的完整发布原文。上下文若只提供索引，不可声称已读原文；按本轮需要用 read_file 读取所引用文件，缺失或待定必须如实列出。\n\n读完后，仅给开发者一段简洁可见回复：概括已读取的需求/知识/Skill及来源版本，列出需要开发者确认的问题，明确“已准备，等待开发者通过 TUI 交互或显式 CLI 工作指令继续需求澄清”。随后结束这一轮并等待，不继续执行任何业务步骤。后续 TUI 交互或显式 CLI 工作轮，只有开发者的明确指令才允许按当前节点的Teams协作Skill开展工作。\n`;
+      const prompt = `# Teams 会话初始化：${task.title}\n项目 ${scope.projectId}；任务 ${scope.taskId}；节点 prepare（需求澄清）；初始化 ${preparationId}。\n\n本轮仅为开发者准备会话。你必须先用 read_file 读取以下文件的全部行，不要指定 offset/limit；若返回 [Long lines truncated ...]，必须按提示用 offset=<行号>、limit=1 与足够的 max_tokens 重读该行；[Truncated ...] / [Showing lines ...] 提示行不算正文：\n1. ${collaborationSkillPath}\n2. ${contextPath}\n\n本轮的限制优先于所读 Skill 中的执行步骤：只允许 read_file 工具读取材料，不运行 shell、写文件、修改代码、创建PRD、调用Teams CLI写操作、inputs adopt、progress add、result submit、验收或切换节点。不要创建todo或委派Agent。不要把需求、采用依据、PRD或检查标记为已确认。需求、知识与 Skill 以结构化上下文中的当前节点版本为准；contentRef 指向同文档正文，references.absolutePath 指向带 SHA256/版本的完整发布原文。上下文若只提供索引，不可声称已读原文；按本轮需要用 read_file 读取所引用文件，缺失或待定必须如实列出。\n\n读完后，仅给开发者一段简洁可见回复：概括已读取的需求/知识/Skill及来源版本，列出需要开发者确认的问题，明确“已准备，等待开发者通过 TUI 交互或显式 CLI 工作指令继续需求澄清”。随后结束这一轮并等待，不继续执行任何业务步骤。后续 TUI 交互或显式 CLI 工作轮，只有开发者的明确指令才允许按当前节点的Teams协作Skill开展工作。\n`;
       await atomicText(taskFile,prompt);
       reads = await Promise.all([contextPath,collaborationSkillPath].map(async path=>({path,sha256:createHash('sha256').update(await readFile(path)).digest('hex')})));
     }
     verify(); // Reassignment or a replaced queue must not start an obsolete model turn.
     const trace = nativeTraceEnvironment(process.env,{...scope,nodeId:'prepare',runId:preparationId});
-    return this.prepareTransport({runId:preparationId,scope:{...scope,nodeId:'prepare'},assigneeId,directory:plan.directory.root,executable:binary,runner:join(root,'scripts/native/run-project-task.mjs'),runtime:this.directory,taskFile,contextPath,skillPath:collaborationSkillPath,reads,agent:plan.instance.agent,agentLabel:plan.instance.agentLabel??plan.instance.agent,model:plan.instance.model,modelLabel:plan.instance.modelLabel??plan.instance.model,env:trace.env});
+    const selected = await selectICode();
+    return this.prepareTransport({runId:preparationId,scope:{...scope,nodeId:'prepare'},assigneeId,directory:plan.directory.root,executable:selected.status==='ready'?selected.path!:binary,runner:join(root,'scripts/native/run-project-task.mjs'),runtime:this.directory,taskFile,contextPath,skillPath:collaborationSkillPath,reads,agent:plan.instance.agent,agentLabel:plan.instance.agentLabel??plan.instance.agent,model:plan.instance.model,modelLabel:plan.instance.modelLabel??plan.instance.model,env:trace.env});
   }
   private async bindings(): Promise<Record<string, string>> {
     try { const value = JSON.parse(await readFile(join(this.directory, 'project-work-bindings.json'), 'utf8')); if (!value || Array.isArray(value) || Object.values(value).some(path => typeof path !== 'string' || !isAbsolute(path))) throw new Error('本机目录绑定记录损坏'); return value; }
@@ -263,7 +264,7 @@ export class ProjectWorkService {
     const cliReason=mode==='cli'?(!requirement||!['prepare','develop','verify'].includes(work.target.nodeId??'')?'CLI 工作需要明确的当前交付任务和节点':history?.active?'当前任务会话仍在运行；CLI 不会重复恢复，请等待原作业结束':!history?.prepared?'请先完成本任务知识与真实会话准备，再发起 CLI 工作':undefined):undefined;
     const reason = taskStartReason ?? cliReason ?? preparationReason ?? (history?.active ? undefined : launchReason ?? knowledgeReason);
     const actions: ProjectWorkPlan['actions'] = [{ id: history?.active ? 'focus' : history ? 'resume' : 'new', label: history?.active ? '进入正在运行的会话' : history ? '进入已准备会话' : requirement ? '打开当前节点的 iCode 交互会话' : '新建当前工作的 iCode 会话', enabled: !reason, ...(reason ? { reason } : {}) }];
-    const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary, ...defaults, trace: requirement ? defaults?.trace : undefined }, directory, context, actions, defaultAction: 'new' };
+    const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary: (await selectICode()).path??binary, ...defaults, trace: requirement ? defaults?.trace : undefined }, directory, context, actions, defaultAction: 'new' };
     if(history){plan.history=history;plan.defaultAction=history.active?'focus':'resume';}
     plan.planToken = hash({ role, plan, revision: state.revision });
     plan.previous = await this.previous(work.target); return plan;
