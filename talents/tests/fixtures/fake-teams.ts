@@ -6,9 +6,10 @@ import type { SharedTeams, TeamsSnapshot } from '../../../shared/contracts.ts';
 import snapshot from './teams-snapshot.json' with { type: 'json' };
 
 export const boundRemote = 'https://github.com/JeffyLiu003/carddemo-java-1025.git';
-export async function fakeTeams(port: number): Promise<Server> {
+/** path: the directory the Credit Card repository is bound to (a repository with a CodeGraph index for tests that show its graph). */
+export async function fakeTeams(port: number, { path = '/work/carddemo-java-1025' } = {}): Promise<Server> {
   const served: SharedTeams = { revision: 'fake.1', snapshot: { ...(snapshot as TeamsSnapshot), projects: (snapshot as TeamsSnapshot).projects.map(p => p.id !== 'carddemo' ? p
-    : { ...p, repositories: p.repositories.map(r => ({ ...r, path: '/work/carddemo-java-1025', remote: boundRemote, branch: 'develop' })) }) } };
+    : { ...p, repositories: p.repositories.map(r => ({ ...r, path, remote: boundRemote, branch: 'develop' })) }) } };
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const json = (value: unknown) => { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)); };

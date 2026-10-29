@@ -44,6 +44,8 @@ export function ArtifactStatus({ a }: { a: Artifact }) {
   const st = status(a);
   if (st === 'draft') return <Tag color="warning">待审阅</Tag>;
   if (st === 'update') return <Tag color="warning">新版本待审阅</Tag>;
+  // A code graph shows the index as it is when opened: it has no version to show.
+  if (a.cap === 'codegraph') return <Tag color="success">已构建</Tag>;
   return <Tag color="success">{a.kind === 'index' ? '远端索引' : a.submission ? 'PR 已创建' : '已有版本'} · v{a.published!.version}</Tag>;
 }
 /** 新 / 改 / 删 markers next to file names. */

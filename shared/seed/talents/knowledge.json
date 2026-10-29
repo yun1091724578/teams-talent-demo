@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "exportedAt": "2026-10-27T13:47:28.270Z",
+  "exportedAt": "2026-10-26T02:32:00.000Z",
   "artifacts": [
     {
       "id": "a-platinum-cashback-page",
@@ -450,38 +450,6 @@
           "type": "json"
         }
       ]
-    },
-    {
-      "id": "a-cg-java",
-      "projectId": "carddemo",
-      "name": "carddemo-java-1025 代码图谱",
-      "description": "查询 carddemo-java-1025 中类、方法的定义与调用关系。",
-      "capability": "codegraph",
-      "capabilityName": "CodeGraph",
-      "category": "index",
-      "kind": "index",
-      "version": 3,
-      "publishedAt": "2026-10-27T12:16:47.022Z",
-      "note": "本地真实索引 · 5774e64217fd5b2c",
-      "delivery": "cloud",
-      "stats": [
-        [
-          "文件",
-          "324"
-        ],
-        [
-          "节点",
-          "4,606"
-        ],
-        [
-          "关系",
-          "7,676"
-        ]
-      ],
-      "agents": [
-        "Code"
-      ],
-      "files": []
     },
     {
       "id": "a-docidx",

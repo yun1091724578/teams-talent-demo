@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } fro
 import { createRoot } from 'react-dom/client';
 import { Alert, App as AntApp, Button, ConfigProvider, Select, Spin, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN.js';
-import { ReadOutlined } from '@ant-design/icons';
+import { MenuFoldOutlined, MenuUnfoldOutlined, ReadOutlined } from '@ant-design/icons';
 import { FrameworkSidebar } from './vendor/teams/components/framework-sidebar.tsx';
 import { teamsTheme, type UiThemeMode } from './vendor/teams/theme.ts';
 import { designSystemCss } from './vendor/teams/design-system.ts';
@@ -29,6 +29,8 @@ const content: Record<string, () => ReactNode> = {
 function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): void }) {
   const { state: st, teams, route, role, go, teamsLink } = useTalents();
   const [width, setWidth] = useState(200); // the Teams sidebar default
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('talents-sidebar-collapsed') === 'true');
+  useEffect(() => { localStorage.setItem('talents-sidebar-collapsed', String(collapsed)); }, [collapsed]);
   const person = (r: Role) => member(st, r === 'admin' ? st.team.admin : st.team.me)?.name ?? '未读取到 Teams 成员';
   const page = route.page, Page = content[page.id];
   // The level shown (a project, or the team) and the artifact open in its review tab.
@@ -40,16 +42,18 @@ function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): vo
   const projects = <div role="group" aria-label="项目列表">{st.projects.map(p => <a key={p.id} className={'child' + (focus?.id === p.id ? ' active' : '')} href={levelHash(p.id)} title={p.name} aria-current={focus?.id === p.id ? 'page' : undefined}>{p.name}</a>)}</div>;
 
   return <div className="framework-root" style={{ '--ui-shell-sidebar': width + 'px' } as CSSProperties}>
-    <div className="framework-shell">
+    <div className={'framework-shell' + (collapsed ? ' teams-navigation-collapsed' : '')}>
       <FrameworkSidebar pages={pages.filter(p => p.role === role)} navigation={role === 'admin' ? { projects } : {}} selected={page.id} context={{ projectId: focus?.id }}
-        collapsed={false} width={width} onResize={setWidth} online themeMode={mode} onToggleTheme={onToggleTheme}
+        collapsed={collapsed} width={width} onResize={setWidth} online themeMode={mode} onToggleTheme={onToggleTheme}
         account={{ nickname: person(role) + ' · ' + (role === 'admin' ? 'Owner' : '成员'), color: role === 'admin' ? 'var(--ui-color-avatar-5)' : 'var(--ui-color-avatar-2)' }} />
       <main className="framework-main">
         <header className="main-topbar compact-topbar">
+          <Tooltip title={collapsed ? '展开左侧导航' : '收起左侧导航'}><Button className="global-navigation-toggle" type="text" aria-label={collapsed ? '展开左侧导航' : '收起左侧导航'} aria-expanded={!collapsed}
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(value => !value)} /></Tooltip>
           <nav className={'breadcrumb' + (crumbs.length > 1 ? ' project-breadcrumb' : '')} aria-label="当前位置">
             <Select className="compact-system-switch" aria-label="切换系统" size="small" variant="borderless" value="talent" popupMatchSelectWidth={180}
               onChange={value => { location.href = value === 'tools' ? new URL('/teams?demo-role=' + (role === 'admin' ? 'owner' : 'member') + '#/agent', teams.origin).toString() : teamsLink(); }}
-              options={[{ value: 'teams', label: 'iCode Teams' }, { value: 'talent', label: 'Talents' }, { value: 'tools', label: 'iCode / OpenCode' }]} />
+              options={[{ value: 'teams', label: 'iCode Teams' }, { value: 'talent', label: 'iCode Talents' }, { value: 'tools', label: 'iCode / OpenCode' }]} />
             {crumbs.map(c => <Fragment key={c.label}><span className="breadcrumb-separator">/</span>
               {c.href ? <a className="breadcrumb-parent" href={c.href}>{c.label}</a> : <strong aria-current="page" title={c.label}>{c.label}</strong>}</Fragment>)}
           </nav>

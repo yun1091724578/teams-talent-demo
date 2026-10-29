@@ -8,7 +8,8 @@ import './project-workspace-summary.css';
 /** Project-local entry; selecting another project never displays the device default's directory. */
 export function ProjectWorkspaceSummary({ projectId }: {projectId: string}) {
   const [workspace, setWorkspace] = useState<ProjectWorkspace>(), [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false), [error, setError] = useState('');
+  // #/projects?…&workspace=settings (e.g. from Talents, for a repository it cannot use yet) opens the settings.
+  const [open, setOpen] = useState(() => new URLSearchParams(location.hash.split('?')[1] ?? '').get('workspace') === 'settings'), [error, setError] = useState('');
   useEffect(() => {
     let live=true;setLoading(true);setWorkspace(undefined);setError('');
     getProjectWorkspaces().then(value=>{if(live)setWorkspace(value.projects.find(item=>item.projectId===projectId));})

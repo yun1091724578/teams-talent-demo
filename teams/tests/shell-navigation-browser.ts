@@ -90,11 +90,13 @@ try {
   await workContext.close();
   const talentContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await talentContext.newPage();
-  await page.route(talent + '/**', route => route.fulfill({ contentType: 'text/html', body: '<p>Independent app navigation transport fixture</p>' }));
+  await talentContext.route(talent + '/**', route => route.fulfill({ contentType: 'text/html', body: '<p>Independent app navigation transport fixture</p>' }));
   await page.goto(teams + '/teams?demo-role=owner#/projects?project=carddemo&tab=content');
-  await page.locator('.framework-sidebar').getByRole('link', { name: 'Talents', exact: true }).click();
-  await page.waitForURL(talent + '/talents?role=owner#/review?project=carddemo');
-  assert.equal(await page.locator('.global-navigation-toggle').count(), 0);
+  // Talents opens in a new tab; Teams stays where it was.
+  const [opened] = await Promise.all([talentContext.waitForEvent('page'), page.locator('.framework-sidebar').getByRole('link', { name: 'iCode Talents', exact: true }).click()]);
+  await opened.waitForURL(talent + '/talents?role=owner#/review?project=carddemo');
+  assert.equal(await opened.locator('.global-navigation-toggle').count(), 0);
+  assert.equal(page.url(), teams + '/teams?demo-role=owner#/projects?project=carddemo&tab=content');
   await talentContext.close();
   assert.deepEqual(posts, []); assert.deepEqual(errors, []);
   for (const [index, file] of stateFiles.entries()) assert.deepEqual(await readFile(file), before[index]);

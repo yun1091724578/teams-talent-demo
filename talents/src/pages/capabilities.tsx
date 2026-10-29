@@ -1,6 +1,6 @@
 // 知识能力：按四类展示 Talents 提供的知识生成能力，点开卡片在右侧抽屉看一种能力的详细介绍和定义（engine.yaml）。
 // 从这里新建任务时，在表单中选择任务属于团队还是哪个项目。也可以导入自定义能力：选择一个定义包，校验声明后
-// 加入所选分类。演示只读取和校验声明，不执行其中的任何命令；初版不提供安装和卸载。
+// 加入所选分类。演示只读取和校验声明，不执行其中的命令；CodeGraph 例外：卡片和详情中检测本机是否已安装，未安装时可以安装。
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, App, Button, Collapse, Drawer, Select, Spin, Tag, Tooltip, Upload } from 'antd';
 import { CheckCircleFilled, ImportOutlined, InboxOutlined } from '@ant-design/icons';
@@ -11,6 +11,7 @@ import { CapIcon, CardGrid, Fields, InfoTip, ItemCard, Section } from '../compon
 import type { Capability } from '../types.ts';
 import { capabilityOf, engineOf, engineText, EXAMPLE, guessCategory, operationText, outputText, readEngine, sourceKind, type EngineDecl } from '../demo/engine.ts';
 import { TaskForm } from './tasks.tsx';
+import { CodegraphInstall, CodegraphInstallDetail } from '../components/codegraph-install.tsx';
 
 export function Capabilities() {
   const { state: st, go, toast } = useTalents();
@@ -22,7 +23,7 @@ export function Capabilities() {
     {st.categories.map(cat => <Section key={cat.id} title={cat.name} info={cat.desc}>
       <CardGrid>{st.capabilities.filter(c => c.cat === cat.id).map(c =>
         <ItemCard key={c.id} icon={<CapIcon cap={c} />} title={c.name} subtitle={c.desc} onClick={() => setOpened(c.id)} extra={<CapTags c={c} />}
-          actions={<Button size="small" onClick={() => setCreating(c.id)}>新建任务</Button>}>
+          actions={<>{c.id === 'codegraph' && <CodegraphInstall />}<Button size="small" onClick={() => setCreating(c.id)}>新建任务</Button></>}>
           <Fields rows={[['输入', c.inputLabel], ['产出', c.output]]} />
         </ItemCard>)}</CardGrid>
     </Section>)}
@@ -80,6 +81,7 @@ function CapabilityDetail({ cap, onClose, onCreate }: { cap: Capability; onClose
         </div>)}</div>
       </div>}
       <div className="field"><span className="label">输出</span><p>{cap.detail.output}</p></div>
+      {cap.id === 'codegraph' && <CodegraphInstallDetail />}
       {e && text && <Definition e={e} text={text} builtin={!cap.custom} />}
     </div>
   </Drawer>;

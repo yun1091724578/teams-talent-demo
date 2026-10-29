@@ -8,6 +8,7 @@ import { capability } from '../demo/model.ts';
 import * as K from '../demo/knowledge.ts';
 import { Fields } from './ui.tsx';
 import { CodeGraphView } from './codegraph.tsx';
+import { useTalents } from '../store.tsx';
 
 /** Markdown with its front matter shown as fields and the added lines of ```diff blocks highlighted. */
 export function Markdown({ text }: { text: string }) {
@@ -70,8 +71,11 @@ export function FileContent({ st, a, file, text }: { st: TalentsState; a: Artifa
   return <pre className="plain">{text}</pre>;
 }
 
+/** A code graph reads the repository's CodeGraph index when opened; other indexes show their figures. */
+export const isCodegraphIndex = (a: Artifact) => a.cap === 'codegraph' && !!a.projectId;
 export function IndexSummary({ a }: { a: Artifact }) {
-  if (a.graphSnapshot && a.projectId) return <CodeGraphView projectId={a.projectId} />;
+  const { syncCodegraph } = useTalents();
+  if (isCodegraphIndex(a)) return <CodeGraphView projectId={a.projectId!} sourceId={a.sources[0]} onLoaded={syncCodegraph} />;
   return <div className="index-summary"><div className="stat-row">{(a.stats ?? []).map(([label, value]) => <div className="stat" key={label}><b>{value}</b><span>{label}</span></div>)}</div>
     <p>{a.desc}</p></div>;
 }
@@ -113,7 +117,7 @@ export function ArtifactPreview({ st, a, which = 'published', onClose }: { st: T
   const [file, setFile] = useState(() => list.find(f => !/index\.md$/.test(f)) ?? list[0]);
   const cap = capability(st, a.cap);
   const title = <div><div className="caption">{cap.name}</div>{a.name}</div>;
-  if (K.isIndex(a)) return <Modal open title={title} footer={null} onCancel={onClose} width={a.graphSnapshot ? 1280 : 640} destroyOnHidden><IndexSummary a={a} /></Modal>;
+  if (K.isIndex(a)) return <Modal open title={title} footer={null} onCancel={onClose} width={isCodegraphIndex(a) ? 1280 : 640} destroyOnHidden><IndexSummary a={a} /></Modal>;
   const groups: FileGroup[] = K.fileGroups(a, list).map((g, i) => ({ title: g.title || (i ? '' : '内容'), items: g.items.map(f => ({ key: f, label: K.fileLabel(f), indent: !!g.title && a.folder === 'miner' })) }));
   (a.skills ?? []).forEach(name => groups.push({ title: '配套 Skill：' + name, items: skillTree(name).map(f => ({ key: 'skills/' + name + '/' + f, label: f, indent: f.includes('/') })) }));
   const keys = groups.flatMap(g => g.items.map(it => it.key));

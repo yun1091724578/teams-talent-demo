@@ -1,17 +1,26 @@
+// Code graphs from a CodeGraph index (server/codegraph-export.ts) and the views, search and details the page asks for
+// (server/codegraph-query.ts), on a small made-up repository (tests/fixtures/codegraph-repo.ts).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { gunzipSync } from 'node:zlib';
-import { graphView, type GraphOptions } from '../src/codegraph-model.ts';
-import { codegraphSnapshot, hasCodegraph, withCodegraph, withoutCodegraph } from '../server/codegraph.ts';
-import { seedState } from '../server/seed.ts';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { graphPage, isTestPath, nodeDetail, searchGraph } from '../server/codegraph-query.ts';
+import { exportSnapshot } from '../server/codegraph-export.ts';
+import { readSnapshot } from '../server/codegraph-view.ts';
+import type { ViewOptions } from '../../shared/codegraph.ts';
+import { codegraphRepository, FIXTURE } from './fixtures/codegraph-repo.ts';
 
-const graph = codegraphSnapshot('carddemo')!;
-const options: GraphOptions = { level: 'symbol', service: '', tests: true, crossCalls: true, kinds: [], relation: '', focus: '', hops: 1 };
+const directory = await mkdtemp(join(tmpdir(), 'codegraph-'));
+const repository = await codegraphRepository(join(directory, 'shop'));
+await exportSnapshot({ repository, projectId: 'carddemo', output: join(directory, 'graph'), root: repository });
+const graph = readSnapshot(join(directory, 'graph'), 'carddemo')!;
+const options: ViewOptions = { level: 'symbol', scope: '', tests: true, kinds: [], relation: '', focus: '', hops: 1 };
+const place = graph.nodes.find(n => n.name === 'place' && n.filePath.endsWith('/OrderService.java'))!;
 
-test('archived snapshot has valid endpoints and source locations without reading the current workspace', () => {
+test('an index exports with valid endpoints, the sources it was made from and their source locations', () => {
+  assert.deepEqual([graph.metadata.files, graph.metadata.nodes - graph.metadata.files], [FIXTURE.files, FIXTURE.symbols]);
   const ids = new Set(graph.nodes.map(n => n.id));
   assert.equal(ids.size, graph.metadata.nodes);
   assert.equal(graph.edges.length, graph.metadata.edges);
@@ -21,72 +30,92 @@ test('archived snapshot has valid endpoints and source locations without reading
     digest.update(path).update('\0').update(createHash('sha256').update(source).digest('hex')).update('\0');
   }
   assert.equal(digest.digest('hex'), graph.metadata.sourceDigest);
-  const method = graph.nodes.find(n => n.name === 'activate' && n.filePath.endsWith('application/CampaignApplicationService.java'))!;
-  assert.ok(graph.sources[method.filePath].split('\n')[method.startLine - 1].includes('activate'));
-  assert.ok(graph.edges.some(e => e.source === method.id && e.kind === 'calls'));
+  assert.ok(graph.sources[place.filePath].split('\n')[place.startLine - 1].includes('place'));
+  assert.ok(graph.edges.some(e => e.source === place.id && e.kind === 'calls'));
 });
 
-test('archived JSON and compressed CodeGraph database match their manifest checksums', () => {
-  const directory = resolve('data/codegraph/carddemo/snapshots', graph.metadata.snapshotId);
-  const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'));
-  for (const name of ['graph.json', 'codegraph.db.gz']) {
-    assert.equal(createHash('sha256').update(readFileSync(resolve(directory, name))).digest('hex'), manifest.checksums[name]);
-  }
-  const database = gunzipSync(readFileSync(resolve(directory, 'codegraph.db.gz')));
-  assert.equal(database.subarray(0, 15).toString(), 'SQLite format 3');
-  assert.equal(createHash('sha256').update(database).digest('hex'), manifest.checksums['codegraph.db']);
+test('a source changed since indexing is not attached; an index being built is not exported', async () => {
+  const changed = await codegraphRepository(join(directory, 'changed'));
+  await writeFile(join(changed, place.filePath), '// edited after indexing\n');
+  await exportSnapshot({ repository: changed, projectId: 'carddemo', output: join(directory, 'changed-graph'), root: changed });
+  const shown = readSnapshot(join(directory, 'changed-graph'), 'carddemo')!;
+  assert.equal(shown.sources[place.filePath], undefined);
+  assert.equal(Object.keys(shown.sources).length, FIXTURE.files - 1);
+  const building = await codegraphRepository(join(directory, 'building'), 'indexing');
+  await assert.rejects(exportSnapshot({ repository: building, projectId: 'carddemo', output: join(directory, 'building-graph'), root: building }), /incomplete/);
 });
 
-test('filters hide cross-service calls and tests; aggregate weights preserve original edge counts', () => {
+test('test code is recognised by the usual directory and file name conventions', () => {
+  for (const path of ['services/a/src/test/java/AT.java', 'tests/app/x.py', 'pkg/test_x.py', 'pkg/x_test.go', 'web/__tests__/a.ts', 'web/a.spec.tsx', 'web/a.test.mjs', 'src/FooTest.java', 'conftest.py'])
+    assert.ok(isTestPath(path), path);
+  for (const path of ['src/testing_utils.py', 'src/contest.py', 'src/attest/x.py', 'src/Latest.java', 'docs/testplan.md']) assert.ok(!isTestPath(path), path);
+});
+
+test('views filter tests and relations; files merge their edges, coloured by language; symbols coloured by kind', () => {
   const before = JSON.stringify(graph);
-  const view = graphView(graph, { ...options, level: 'service', tests: false, crossCalls: false });
-  assert.ok(view.links.every(e => e.kind !== 'calls'));
-  const filtered = new Set(graph.nodes.filter(n => !n.test).map(n => n.id));
-  const expected = graph.edges.filter(e => filtered.has(e.source) && filtered.has(e.target) && e.crossService && e.kind !== 'calls').length;
-  assert.equal(view.links.reduce((n, e) => n + e.count, 0), expected);
-  assert.equal(JSON.stringify(graph), before, 'view projection must not mutate the stored snapshot');
-  const files = graphView(graph, { ...options, level: 'file', service: 'marketing-service', tests: false });
-  assert.ok(files.nodes.every(n => n.service === 'marketing-service' && !n.id.includes('/test/')));
+  const files = graphPage(graph, { ...options, level: 'file', tests: false });
+  assert.ok(files.nodes.every(n => n.kind === 'file' && !isTestPath(n.id)));
+  assert.ok(files.nodes.every(n => n.group === graph.nodes.find(x => x.filePath === n.id)!.language && files.groups.includes(n.group)));
+  const kept = new Map(graph.nodes.filter(n => !isTestPath(n.filePath)).map(n => [n.id, n.filePath]));
+  const expected = graph.edges.filter(e => kept.has(e.source) && kept.has(e.target) && kept.get(e.source) !== kept.get(e.target)).length;
+  assert.equal(files.links.reduce((n, e) => n + e.count, 0), expected, 'merged links count every edge between two files');
+  const calls = graphPage(graph, { ...options, relation: 'calls' });
+  assert.ok(calls.links.length && calls.links.every(e => e.kind === 'calls'));
+  assert.ok(calls.nodes.every(n => n.group === n.kind && ['class', 'interface', 'enum', 'method', 'function', 'route'].includes(n.kind)));
+  assert.equal(JSON.stringify(graph), before, 'views must not change the stored snapshot');
 });
 
-test('one-hop symbol view is an induced neighborhood of the selected relation', () => {
-  const center = graph.nodes.find(n => n.name === 'activate' && n.filePath.endsWith('application/CampaignApplicationService.java'))!;
-  const view = graphView(graph, { ...options, relation: 'calls', focus: center.id });
-  assert.ok(view.nodes.some(n => n.id === center.id));
-  assert.ok(view.nodes.length > 1);
+test('a graph opens on its symbols when they can all be drawn, else on its directories; without tests unless asked', () => {
+  const opened = graphPage(graph, {});
+  assert.deepEqual([opened.options.level, opened.options.tests], ['symbol', false]);
+  assert.ok(opened.nodes.every(n => !isTestPath(graph.nodes.find(x => x.id === n.id)!.filePath)));
+  const small = graphPage(graph, {}, { nodes: 10, links: 300, dirGroups: 30 });
+  assert.equal(small.options.level, 'dir');
+  assert.ok(small.nodes.length <= 30 && small.nodes.every(n => ['dir', 'file'].includes(n.kind)));
+  const symbols = graphPage(graph, { level: 'symbol' }).nodes.length;
+  assert.equal(small.nodes.reduce((n, v) => n + v.members, 0), graph.nodes.filter(n => !isTestPath(n.filePath)).length, 'directories stand for every symbol under them');
+  assert.ok(symbols > 0);
+});
+
+test('a directory view opens level by level within a scope; a file scope shows its symbols', () => {
+  const top = graphPage(graph, { level: 'dir' }, { nodes: 2000, links: 6000, dirGroups: 4 });
+  const service = top.nodes.find(n => n.kind === 'dir' && n.id.includes('orders'))!;
+  const inner = graphPage(graph, { level: 'dir', scope: service.id });
+  assert.ok(inner.nodes.length > 1 && inner.nodes.every(n => n.id.startsWith(service.id + '/')));
+  assert.equal(inner.nodes.reduce((n, v) => n + v.members, 0), service.members);
+  const file = inner.nodes.find(n => n.kind === 'file')!;
+  assert.ok(file.node, 'a file shows its file node');
+  const symbols = graphPage(graph, { level: 'dir', scope: file.id });
+  assert.equal(symbols.options.level, 'symbol');
+  assert.ok(symbols.nodes.length && symbols.nodes.every(n => graph.nodes.find(x => x.id === n.id)!.filePath === file.id));
+});
+
+test('a neighbourhood is induced by the selected relation; a view too large is limited to its best connected part', () => {
+  const center = place;
+  const view = graphPage(graph, { ...options, relation: 'calls', focus: center.id });
+  assert.ok(view.nodes.some(n => n.id === center.id) && view.nodes.length > 1);
   for (const node of view.nodes) assert.ok(node.id === center.id || graph.edges.some(e => e.kind === 'calls'
     && ((e.source === center.id && e.target === node.id) || (e.target === center.id && e.source === node.id))));
   assert.ok(view.links.every(e => e.kind === 'calls'));
+  const limited = graphPage(graph, { ...options, focus: center.id, hops: 2 }, { nodes: 10, links: 12, dirGroups: 30 });
+  assert.equal(limited.nodes.length, 10);
+  assert.ok(limited.total.nodes > 10 && limited.links.length <= 12);
+  assert.ok(limited.nodes.some(n => n.id === center.id), 'the focus is always drawn');
+  const kept = new Set(limited.nodes.map(n => n.id));
+  assert.ok(limited.links.every(l => kept.has(l.source) && kept.has(l.target)));
 });
 
-test('saved simulated statistics cannot replace the authoritative index metadata', () => {
-  const state = seedState(), original = structuredClone(state);
-  const artifact = withCodegraph(state).artifacts.find(a => a.id === 'a-cg-java')!;
-  assert.deepEqual(artifact.stats?.map(([, value]) => Number(value.replaceAll(',', ''))), [graph.metadata.files, graph.metadata.nodes, graph.metadata.edges]);
-  // The archive is not tied to a commit of the bound repository: the version names the snapshot instead.
-  assert.equal(artifact.published?.basis, null);
-  assert.equal(artifact.published?.note, '归档图谱快照 · ' + graph.metadata.snapshotId.slice(0, 8));
-  assert.equal(artifact.graphSnapshot, graph.metadata.snapshotId);
-  assert.deepEqual(state, original);
-});
-
-test('snapshots are read per project; a project without one has none', () => {
-  assert.equal(graph.metadata.project, 'carddemo');
-  assert.equal(codegraphSnapshot('teams'), null);
-  assert.equal(hasCodegraph('../carddemo'), false);
-  const state = seedState();
-  state.artifacts.push({ ...structuredClone(state.artifacts.find(a => a.id === 'a-cg-java')!), id: 'a-cg-teams', projectId: 'teams' });
-  const shown = withCodegraph(state);
-  assert.equal(shown.artifacts.find(a => a.id === 'a-cg-teams')!.graphSnapshot, undefined);
-  assert.equal(shown.artifacts.find(a => a.id === 'a-cg-java')!.graphSnapshot, graph.metadata.snapshotId);
-});
-
-test('saving the shown state back does not store the snapshot values', () => {
-  const stored = seedState(), shown = withCodegraph(stored);
-  assert.notDeepEqual(shown, stored);
-  assert.deepEqual(withoutCodegraph(structuredClone(shown), stored), stored);
-  // A real change to the artifact is kept.
-  const changed = structuredClone(shown), a = changed.artifacts.find(a => a.id === 'a-cg-java')!;
-  a.published!.version += 1; a.published!.note = '远端索引已就绪';
-  assert.equal(withoutCodegraph(changed, stored).artifacts.find(a => a.id === 'a-cg-java')!.published!.note, '远端索引已就绪');
+test('search looks at the whole graph; details list the connections of a node', () => {
+  const hits = searchGraph(graph, 'OrderServ', false);
+  assert.deepEqual(hits.map(h => h.name), ['OrderService', 'OrderService.java'], 'names first, then file paths; tests left out');
+  assert.ok(searchGraph(graph, 'Test', false).every(h => !h.test));
+  assert.ok(searchGraph(graph, 'Test', true).some(h => h.test));
+  const detail = nodeDetail(graph, hits[0].id)!;
+  assert.equal(detail.node.name, 'OrderService');
+  assert.equal(detail.total, graph.edges.filter(e => e.source === hits[0].id || e.target === hits[0].id).length);
+  assert.ok(detail.connections.length <= 40);
+  for (const c of detail.connections) {
+    const edge = graph.edges.find(e => e.id === c.id)!;
+    assert.equal(c.incoming ? edge.source : edge.target, c.other.id, 'the other end of each connection');
+  }
 });
