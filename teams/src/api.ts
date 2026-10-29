@@ -83,3 +83,6 @@ export const getTaskSessionStream = (role: Role, query: import('./task-session-s
 export const getTaskNodeInputs=(role:Role,scope:{projectId:string;taskId:string;nodeId:import('./delivery-requirements.js').RequirementNode})=>tracedJson<import('./talent-node-inputs.js').TalentNodeInputs>('teams','/api/task-node-inputs?'+new URLSearchParams({role,...scope}));
 
 export const getTaskArtifactContent=(role:Role,query:import('./task-artifact-content.js').TaskArtifactQuery)=>tracedJson<import('./task-artifact-content.js').TaskArtifactContent>('teams','/api/task-artifact-content?'+new URLSearchParams({role,...query}));
+
+export const getProjectWorkspaces=()=>tracedJson<import('./project-workspace.js').ProjectWorkspaces>('teams','/api/project-workspaces');
+export const saveProjectWorkspace=(role:Role,input:{projectId:string;directory:string;remoteUrl:string;baseBranch:string})=>tracedJson<import('./project-workspace.js').ProjectWorkspaces>('teams','/api/project-workspaces',{method:'POST',body:JSON.stringify({...input,role})});

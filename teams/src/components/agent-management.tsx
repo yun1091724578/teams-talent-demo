@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Alert, Button, Descriptions, Space } from 'antd';
-import { getTools, native, type NativeStatus } from '../api.js';
+import { Alert, Button, Descriptions, Space, Modal, Input } from 'antd';
+import { getTools, native, getProjectWorkspaces, saveProjectWorkspace, type NativeStatus } from '../api.js';
 import { Context, useDemo, type DemoContext } from '../context.js';
 import { Origin } from './common.js';
 import { mount } from '../vendor/teams/agent-management/index.js';
@@ -141,7 +141,9 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
           if (command.action === 'adapter.list') { statusPromise = undefined; value = { result: { adapters: registrations } }; }
           else if (command.action === 'working-directory.list') value = { result: { directories: {} } };
           else if (command.action === 'working-directory.set') {
-            if (command.cwd !== (await status()).icode.workspace) throw new Error('当前启动使用项目工作目录；尚未接入原 Teams 目录选择服务');
+            const configuration=await getProjectWorkspaces(),selected=configuration.projects.find(item=>item.projectId===configuration.defaultProjectId);
+            if(!selected)throw new Error('请先到项目概览的工作区设置中配置本机目录');
+            await saveProjectWorkspace(latest.current.role,{...selected,directory:String(command.cwd)});statusPromise=undefined;
             value = { result: {} };
           } else throw new Error(`尚未接入 Teams 管理操作：${String(command.action)}`);
         } else throw new Error(`工具适配器未声明该数据源：${String(input)}`);
@@ -179,10 +181,10 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
                 launchLabel: `启动 ${names[tool]}`,
                 hint: current.terminalError ?? `新建会话使用 ${current.terminalName}；项目和需求入口共用此本机偏好。`,
                 disabledReason: current.terminalError ?? (found.installed ? undefined : tool === 'opencode' && current.opencode.unsupportedReason ? current.opencode.unsupportedReason : '当前设备尚未发现此工具。'),
-                async chooseDirectory() { throw new Error('当前使用项目工作目录；原 Teams 的目录选择服务尚未接入'); },
+                async chooseDirectory(cwd) {return new Promise(resolve=>{let value=cwd??'';Modal.confirm({title:'项目工作目录',content:<Input defaultValue={value} onChange={event=>{value=event.target.value;}} placeholder="输入本机 Git 仓库绝对路径"/>,onOk(){resolve({cancelled:false,cwd:value});},onCancel(){resolve({cancelled:true});}});});},
                 async selectTerminal(terminal) { await native(latest.current.role, 'terminal', { terminal }); statusPromise = undefined; },
                 async launch(input) {
-                  if (input.cwd !== current.icode.workspace) throw new Error('当前仅支持此项目工作目录，请恢复显示的项目路径后启动');
+                  if (input.cwd !== (await status()).icode.workspace) throw new Error('工作目录与已保存配置不一致，请保存后重新启动');
                   const receipt = await native(latest.current.role, 'launch', { tool, restore: false, requestId: crypto.randomUUID(), terminal: input.terminal });
                   return { message: receipt.note ?? '已请求本机终端启动。' };
                 },
