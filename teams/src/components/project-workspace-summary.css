@@ -1,0 +1,4 @@
+.project-workspace-summary{display:flex;align-items:center;gap:var(--ui-space-2);padding:var(--ui-space-2) var(--ui-space-3);border:1px solid var(--ui-color-border);border-radius:var(--ui-radius-card,8px);min-width:0}
+.project-workspace-summary>strong,.project-workspace-summary>.muted{white-space:nowrap}
+.project-workspace-summary>.project-workspace-path{flex:1;min-width:0}
+@media(max-width:800px){.project-workspace-summary{flex-wrap:wrap}.project-workspace-summary>.project-workspace-path{flex-basis:65%}}

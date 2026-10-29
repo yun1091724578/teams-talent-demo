@@ -73,3 +73,25 @@ test('the store checks the revision and writes every change', async () => {
   assert.equal(store.state.role, 'admin');
   assert.equal(store.state.revision, first + 2);
 });
+
+test('restarting takes the current built-in capabilities and keeps imported ones', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'talents-store-')), 'state.json');
+  const first = new Store(path); await first.init();
+  await first.mutate(first.state.revision, s => ({ ...s, capabilities: [...s.capabilities.map(c => ({ ...c, name: '旧名称' })), { id: 'db-schema', cat: 'index', name: '数据库结构索引', custom: true }] }));
+  const again = new Store(path); await again.init();
+  const builtIn = seedState().capabilities;
+  assert.deepEqual(again.state.capabilities.slice(0, builtIn.length).map(c => c.name), builtIn.map(c => c.name));
+  assert.equal(again.state.capabilities.at(-1)!.id, 'db-schema');
+});
+
+test('restarting renames the index artifacts stored under their old names, and nothing else', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'talents-store-')), 'state.json');
+  const first = new Store(path); await first.init();
+  await first.mutate(first.state.revision, s => ({ ...s, artifacts: s.artifacts.map(a => a.id === 'a-cg-java' ? { ...a, name: 'carddemo-java-1025 CodeGraph' } : a.id === 'a-docidx' ? { ...a, name: '自定义名称' } : a) }));
+  const again = new Store(path); await again.init();
+  assert.equal(again.state.artifacts.find(a => a.id === 'a-cg-java')!.name, 'carddemo-java-1025 代码图谱');
+  assert.equal(again.state.artifacts.find(a => a.id === 'a-docidx')!.name, '自定义名称');
+  await again.mutate(again.state.revision, s => ({ ...s, artifacts: s.artifacts.map(a => a.id === 'a-docidx' ? { ...a, name: '信用卡营销交付文档检索索引' } : a) }));
+  const last = new Store(path); await last.init();
+  assert.equal(last.state.artifacts.find(a => a.id === 'a-docidx')!.name, '设计文档检索索引');
+});

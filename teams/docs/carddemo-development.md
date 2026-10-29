@@ -1,6 +1,21 @@
 # CardDemo 初始化与交付检查
 
-本指南适用于 Credit Card 项目的实际代码开发。Teams/Talents 平台继续在 `main` 运行；CardDemo 使用单独的 `develop` 工作区和需求分支。先核对工具，再初始化目录，最后从绑定的任务目录执行开发与测试。
+本指南适用于 Credit Card 项目的实际代码开发。Teams/Talents 与业务代码使用**独立 Git 仓库**。先核对工具，在项目概览中保存业务工作区，再从需求绑定的独立工作区执行开发与测试。
+
+## 独立业务仓库（推荐）
+
+```sh
+git clone https://github.com/JeffyLiu003/carddemo-java-1025.git /absolute/path/carddemo-java-1025
+```
+
+进入 Teams → 项目 → Credit Card → 项目概览 → 工作区设置，填写本机仓库根目录、上述 Git 仓库地址、交付基线分支（该仓库已有 `main`，也可使用自行维护的 `develop`），点击“保存工作区”。Windows 同样填写本机绝对路径，例如 `D:\projects\carddemo-java-1025`。Git、iCode、JDK 21、Maven 必须在运行 Teams 的同一设备上可用。保存会核验目录为 Git 根目录、origin 与填写的仓库相符、基线分支在本地存在；不会自动 checkout、pull、push 或复制未提交代码。
+
+Agent 管理中的普通 iCode/OpenCode 启动使用当前默认项目目录。已分配的新需求在知识获取完成、会话初始化前，自动从**业务仓库本地基线分支当前提交**创建独立 worktree：`<业务仓库名>-tasks/<任务标识>/`，分支 `codex/<项目>-<任务标识>`。TUI、CLI 与产物预览使用同一任务绑定。PR 目标为保存的交付基线分支；该分支需已发布到目标远端才能创建 PR。没有远端写权限时如实回报阻塞，不向 Teams 仓库提交业务代码。
+
+设备配置在实际 Teams 状态目录的 `project-workspaces.json`，新任务固定绑定在 `project-worktree-bindings.json`。状态目录以本机 `teams/.local/config.json` 中 `DEMO_STATE_DIR` 或服务 `/api/health` 的 `stateRoot` 为准。绑定记录仓库、分支、基线 SHA 和绝对目录；修改默认配置只影响后续任务，已有会话与旧任务继续使用原绑定，不能静默迁移。每台机器需要分别 clone 并保存本机路径，不将本机配置提交 Git。
+
+仓库中 `workspace/carddemo-java-1025`、fixtures 和已发布 Talent 文件中的路径是历史素材来源，不再作为已配置项目的新任务执行目录。保留原来源及 SHA256，不能把外部仓库新版本伪装为旧素材版本。
+
 
 ## 启动前核对
 
@@ -42,9 +57,9 @@ Teams 新启动的 iCode CLI／TUI 子进程会合并已有 `NO_PROXY` 和 `no_p
 
 缺少工具时，先安装 JDK 21、Apache Maven、Docker Desktop（启用 Linux 容器）、Git/GitHub CLI 和 Trivy，再核对实际版本。macOS 可用包管理器或官方安装包，Windows 可用官方安装包或已批准的包管理器；不要把另一台机器的绝对路径复制为配置。Maven 首次需要下载插件与依赖，Trivy 首次需要获取漏洞库；下载失败须保留错误并解决，不能改用空报告。仅在项目 POM 明确需要时增加其他服务，本基线无需 Redis。
 
-## 初始化业务基线与需求目录
+## 旧版内嵌基线与需求目录（已有任务）
 
-以下命令均在平台仓库根目录执行。先由维护者明确获取并选定 `origin/main` 或 `origin/develop` 的提交，将输出的完整 40 位 SHA 填入命令。工具不自动 fetch、安装依赖或推送。
+本节仅适用于已有内嵌工作区的维护；新需求请使用上方独立业务仓库配置，不再执行以下初始化。以下命令均在平台仓库根目录执行。先由维护者明确获取并选定 `origin/main` 或 `origin/develop` 的提交，将输出的完整 40 位 SHA 填入命令。工具不自动 fetch、安装依赖或推送。
 
 ```sh
 git remote get-url origin

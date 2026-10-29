@@ -1,3 +1,4 @@
+import {configuredProjectWorkspace, verifyProjectWorkspace} from './project-workspaces.js';
 import { terminalPreferences } from './terminal-preferences.js';
 import { createTerminalLauncher, findExecutable, formatShellCommand, posixQuote } from './terminal-launcher.js';
 import { userSkillExamples } from '../src/project-skill-examples.js';
@@ -25,7 +26,13 @@ export async function installed(path: string) { try { await access(path, constan
 async function openCodePath() {
   return findExecutable(process.env.DEMO_OPENCODE_BINARY ?? 'opencode');
 }
+export async function nativeWorkspace() {
+  const configured=await configuredProjectWorkspace(runtimeDir);
+  if(configured) {await verifyProjectWorkspace(configured);return configured.directory;}
+  return workspace;
+}
 export async function toolsStatus() {
+  const launchWorkspace=await nativeWorkspace();
   const selection = await selectICode().catch(error => ({ path: undefined, version: undefined, source: icodeBinarySource, status: 'none' as const, notes: [...icodeBinaryNotes, 'iCode 探测失败：' + (error as Error).message] }));
   const installedICode = selection.status === 'ready';
   const version: string | null = selection.version ?? null;
@@ -40,7 +47,7 @@ export async function toolsStatus() {
   }
   return {
     ...await terminalPreferences.context(),
-    icode: { installed: installedICode, path: selection.path ?? binary, version, workspace, sessionId: '', sessionAvailable: false, active: null, source: selection.source, notes: selection.notes },
+    icode: { installed: installedICode, path: selection.path ?? binary, version, workspace: launchWorkspace, sessionId: '', sessionAvailable: false, active: null, source: selection.source, notes: selection.notes },
     opencode: { installed: !!opencode && !unsupportedReason, path: opencode, version: openVersion, unsupportedReason, notes: openError ? [openError] : [] },
     verification: null,
   };
@@ -53,16 +60,19 @@ export async function foundationSkill() {
 }
 export async function writeContext(state: DemoState) {
   if (!state.context) throw new Error('请先冻结项目上下文');
+  const projectWorkspace=await configuredProjectWorkspace(runtimeDir,'carddemo');
+  if(projectWorkspace)await verifyProjectWorkspace(projectWorkspace);
+  const projectDirectory=projectWorkspace?.directory??codeRoot;
   const chosen=state.context.selectedSkills;
   const foundation=await foundationSkill();
-  const path = join(runtimeDir, 'contexts', state.context.id + '-' + createHash('sha256').update(state.context.createdAt).digest('hex').slice(0, 12) + '-v3.md');
+  const path = join(runtimeDir, 'contexts', state.context.id + '-' + createHash('sha256').update(state.context.createdAt).digest('hex').slice(0, 12) + '-v4-'+createHash('sha256').update(projectDirectory).digest('hex').slice(0,12)+'.md');
   const content = [
     '# 信用卡消费返现 · DEMO-MKT-001', '',
-    '这是当前需求的上下文材料。当前规则实现位于 teams/src/cashback.ts；请先阅读与核对，不要执行部署、发送消息或修改全局配置。', '',
+    '这是历史主需求的上下文材料。业务代码目录以本机项目工作区为准；当前任务请从任务交付节点启动，读取该节点的最新输入与工作区绑定。teams/src/cashback.ts 仅作为历史规则参考，不代表业务仓库当前实现。', '',
     '## 需求描述', '针对白金卡客户未来 3 个月的消费，额外增加 0.5% 的消费返现。', '',
     '## 已确认范围与待定事项', '已确认：白金卡客户、3 个月、额外返现 0.5%。具体日期、周期起算、消费范围、报名要求、门槛、上限及结算等其他规则待定。当前本地参数不替代正式业务政策。', '',
     '## 采用依据', JSON.stringify(state.context, null, 2), '',
-    '## 本机资料', '项目：' + codeRoot, '当前规则：' + join(root, 'src/cashback.ts'), '需求设计：' + join(root, 'docs/cashback-contract.md'), 'Skill：' + join(workspace, '.agents', 'skills'), '',
+    '## 本机资料', '项目：' + projectDirectory, '历史规则参考：' + join(root, 'src/cashback.ts'), '需求设计：' + join(root, 'docs/cashback-contract.md'), 'Skill：' + join(workspace, '.agents', 'skills'), '',
     chosen.some(name=>userSkillExamples.some(skill=>skill.id===name)) ? '## 本次选用 Skill（项目与用户）' : '## 本次项目选用 Skill', ...chosen.map(name => { const example=userSkillExamples.find(skill=>skill.id===name);return example ? '- '+example.name+'（'+name+' · 用户 Skill，未核验本机安装）：'+example.content : '- ' + name + '：' + join(workspace, '.agents', 'skills', name, 'SKILL.md'); }), '',
     '## 需求补充材料', ...state.context.materials.flatMap(m=>['### '+m.title,m.body,'']),
     '## Agent 基础协作', 'Teams 进度同步 Skill：'+foundation.path,'通过 Teams CLI 回传进度。业务 Skill 与该基础能力分别管理。','',
@@ -86,9 +96,10 @@ export function launch(tool: 'icode' | 'opencode', restore: boolean, requestId: 
     const entry = tool === 'icode' ? (selection.status === 'ready' ? selection.path : undefined) : await openCodePath();
     if (!entry || !await installed(entry)) throw new Error(tool + ' 尚未安装');
     if (restore) throw new Error('历史恢复入口已移除，请新建当前工作的会话');
-    const args = tool === 'icode' ? ['-C', workspace] : [workspace];
+    const directory=await nativeWorkspace();
+    const args = tool === 'icode' ? ['-C', directory] : [directory];
     const terminal = await terminalPreferences.selected(expectedTerminal);
-    const launchedTerminal = await terminalLauncher.launch({ executable: entry, directory: workspace, args, terminal: terminal.id });
+    const launchedTerminal = await terminalLauncher.launch({ executable: entry, directory, args, terminal: terminal.id });
     const receipt = { requestId, tool, restore, at: new Date().toISOString(), ...launchedTerminal, sessionId: null };
     await atomicJson(join(runtimeDir, 'last-launch.json'), receipt); return receipt;
   })().finally(() => { launchBusy = false; });

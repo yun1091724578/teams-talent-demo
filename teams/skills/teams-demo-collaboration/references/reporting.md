@@ -4,6 +4,10 @@
 
 `progress add`：phase 为 started / progress / blocked；summary 写实际进展；阻塞时必须有 blocker；evidence 是引用数组，可为空。解除阻塞时回传 progress 并说明依据，不按计时高频刷状态。
 
+已完成节点不接受普通 started / progress / blocked / result 将其重开或覆盖。明确返工时先读 context.rework.allowed，重新读取并采用本节点输入，再用 phase=started、reopen=true 开始新一轮：需求澄清仅在开发尚未采用输入前；功能开发仅在验证待开始或阻塞时；阻塞的测试验证可以显式重开并提交本轮新检查。上一轮产物与事件保留为历史，不计入新一轮交付物。Owner 页面已退回的开发节点已重开，按普通进度继续即可。reopen 不是节点切换，进入开发用 nodeId=develop、测试用 nodeId=verify。
+
+提交验收后，所有 CLI 写入均禁止，即使 --role owner 也不能验收、退回或重开。需要返工由 Owner 在页面手工退回；再次开发提交后重新获取验证输入、重新采用并提交新检查。模型最终停在待 Owner 验收，不能调用页面 API 绕过 CLI 限制。
+
 开始回执必须先于实际业务编辑和测试：读当前依据 → `inputs adopt` 成功 → 用返回的新 revision 写 `progress add` / started 成功 → 开始业务工作。CLI 的 scope/context/request/receipt 临时文件不属于业务产物，可先写；PRD、设计、源代码与测试不是临时请求文件。新 run/节点重新取当前身份和采用依据，不能用旧成功回执掩盖本轮未采用；失败或超时按幂等规则核对，不能在工作结束后补一条 started 伪造时序。
 
 `result submit`：summary、evidence（至少一条）、completedCriteria。artifact 与 completedCriteria ID 从当前 `context.nodeContract` 读取，不凭记忆套别的节点合同。
@@ -57,8 +61,8 @@ notRunScopes: 尚未运行的必要范围名称数组
 
 仅在开发者已明确开始 develop、当前需求实现完成且必要范围单测实际通过时执行。CLI 显式工作指令与 TUI 内开发者指令遵循同一节点门禁；初始化的只读轮结束不等于 PRD 已确认，也不授权跳过 prepare.confirmed。
 
-先核对启动材料中的工作树、当前任务分支、origin 和允许的 CardDemo 子目录。必须与本任务绑定一致；分支不能是 main、master 或 develop。复用本任务已有分支/PR，PR base 固定 develop。没有已核验任务绑定、真实 remote/权限不可用、工作区混合改动无法区分时，以 progress blocked 回报，不创建替代 PR 或假链接。
+先核对启动材料中的工作树、当前任务分支、origin、允许的业务目录和交付基线分支。必须与本任务绑定一致；分支不能是 main、master 或已配置的交付基线。复用本任务已有分支/PR，PR base 以启动材料核验的 baseBranch 为准，不从目录名或旧会话猜测。独立仓库的业务工作目录就是仓库根目录，不拼接 workspace/carddemo-java-1025；Teams 与业务仓库必须分别提交。没有已核验任务绑定、真实 remote/权限不可用、工作区混合改动无法区分时，以 progress blocked 回报，不创建替代 PR 或假链接。
 
 查看 Git 工作区和暂存区差异，只暂存本需求允许路径/变更块；禁止 git add .，禁止收录暂存区原有无关改动、其他任务、Teams/Talents 工程、历史会话或全局配置。提交前复核完整 staged diff 和必要测试所对应的代码版本；如果无法安全隔离，停下说明阻塞，不替别人还原文件。
 
-推送本任务分支并创建或更新 PR，回传真实 PR URL、完整 commit SHA/codeVersion 和同版本测试证据。不得直接推 main/master/develop、合并 PR 或部署。PR 创建成功也不等于 Owner 验收通过。仅打开 TUI、初始化/prepare 阶段不自动提交；已有运行会话的旧指令不因 Teams 文件更新而自动改变。
+推送本任务分支并创建或更新 PR，回传真实 PR URL、完整 commit SHA/codeVersion 和同版本测试证据。不得直接推 main/master 或已配置的交付基线分支、合并 PR 或部署。PR 创建成功也不等于 Owner 验收通过。仅打开 TUI、初始化/prepare 阶段不自动提交；已有运行会话的旧指令不因 Teams 文件更新而自动改变。

@@ -5,13 +5,33 @@ import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readCarddemoWorkspace,readCarddemoTaskBinding,ensureCarddemoTaskWorkspace as ensureWorkspace,type CarddemoWorktreeBinding} from '../../scripts/lib/carddemo-workspace.mjs';
+import {configuredProjectWorkspace, readProjectTaskBinding, ensureProjectTaskWorkspace} from './project-workspaces.js';
+import type {ProjectTaskWorktree} from '../src/project-workspace.js';
 const platformRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../..'),exec=promisify(execFile);
 type TaskDirectory={projectId:string;id:string;workDirectory?:string};
-export const taskWorktreeBinding=(runtime:string,task:TaskDirectory,repo=platformRoot):Promise<CarddemoWorktreeBinding|null>=>readCarddemoTaskBinding(repo,runtime,task);
-export const ensureCarddemoTaskWorkspace=(runtime:string,scope:{projectId:string;taskId:string},preparationId:string,repo=platformRoot)=>ensureWorkspace({repo,runtime,...scope,preparationId});
+export const taskWorktreeBinding=async(runtime:string,task:TaskDirectory,repo=platformRoot):Promise<CarddemoWorktreeBinding|ProjectTaskWorktree|null>=>await readProjectTaskBinding(runtime,task)??await readCarddemoTaskBinding(repo,runtime,task);
+export async function ensureCarddemoTaskWorkspace(runtime:string,scope:{projectId:string;taskId:string},preparationId:string,repo=platformRoot) {
+  if(!await configuredProjectWorkspace(runtime,scope.projectId))return ensureWorkspace({repo,runtime,...scope,preparationId});
+  const state=JSON.parse(await readFile(join(runtime,'state.json'),'utf8'));
+  const task=state.workspace?.deliveryRequirements?.find((item:TaskDirectory)=>item.id===scope.taskId&&item.projectId===scope.projectId);
+  if(!task)throw new Error('任务不存在');
+  const existing=await taskWorktreeBinding(runtime,task,repo);if(existing)return existing;
+  if(task.workDirectory)return null;
+  if(await configuredProjectWorkspace(runtime,scope.projectId))return ensureProjectTaskWorkspace(runtime,task,preparationId);
+  return ensureWorkspace({repo,runtime,...scope,preparationId});
+}
 /** Explicit task binding. Current worktree identity is checked without rewriting historical task/session evidence. */
 export async function taskWorkDirectory(runtime:string,task:TaskDirectory,repo=platformRoot,requireWorkspace=true) {
   const worktree=await taskWorktreeBinding(runtime,task,repo);if(worktree)return worktree.directory;
+  const configured=await configuredProjectWorkspace(runtime,task.projectId);
+  if(configured&&!task.workDirectory){
+    let saved:any;try{saved=JSON.parse(await readFile(join(runtime,'state.json'),'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    const prepared=saved?.workspace?.taskAutomation?.find((item:any)=>item.projectId===task.projectId&&item.taskId===task.id)?.preparation?.session?.directory;
+    if(prepared)return prepared as string;
+    const recorded=saved?.workspace?.deliveryRequirements?.find((item:any)=>item.projectId===task.projectId&&item.id===task.id);
+    if(recorded?.preparedAt||recorded&&Object.values(recorded.nodes??{}).some((node:any)=>node.status!=='pending'))throw new Error('此任务已执行但没有独立仓库绑定，请保留原任务目录，不能按新配置迁移');
+    return configured.directory;
+  }
   const path=join(runtime,'project-task-directory-bindings.json');let value:any;
   try{value=JSON.parse(await readFile(path,'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT'){if(requireWorkspace&&task.projectId==='carddemo'&&await readCarddemoWorkspace(repo))throw new Error('此需求尚未绑定 CardDemo 任务工作区，请运行 carddemo:workspace task init');return task.workDirectory;}throw error;}
   if(value?.version!==1||!Array.isArray(value.bindings))throw new Error('本机任务目录绑定记录无效');

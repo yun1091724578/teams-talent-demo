@@ -15,6 +15,8 @@ description: 在 Teams 已提供项目、任务、节点和原生会话入口时
 
 对已实际读过且版本未变的材料直接复用，不每轮全文重读。开发者明确切换节点、输入版本变化或服务报告依据冲突时，再获取该节点的上下文；保持项目、任务、角色、run/session 身份，不复用初始 scope 的旧 nodeId。
 
+开发者说“进行功能开发”时，将 scope.nodeId 改为 develop；说“开始测试验证”时改为 verify，然后重新 context get、阅读本节点输入、inputs adopt，再 progress add。context.currentNodeId 给出任务当前阶段；页面切换或同一会话继续聊天不会自动改写你保存的 scope 文件。PRD 提交成功后，不得再以 prepare 回传开发进度。已完成节点普通回传不能重开；明确返工先读 context.rework.allowed，再按[返工规则](references/reporting.md)显式 started + reopen=true。待验收后必须由 Owner 页面手工退回，禁止用 CLI 或页面 API 代验收/退回。
+
 每次业务工作轮严格先读当前节点上下文与所需材料，再 `inputs adopt`，收到成功回执后 `progress add`（phase=started）；两次写入成功后才可编辑业务文档/代码或执行测试，不能先做后补。采用使用刚读取的 revision、basisDigest、完整 scope（含 tab）、真实 readReferences 并保存 adoptionId；开始进度使用采用后的 revision。失败先核对并解决或回传阻塞，不继续业务修改。读取、Hook 提醒或会话就绪不等于采用；各节点/run 不能借用旧 adoptionId。
 
 ## 回传与交接
@@ -23,7 +25,7 @@ description: 在 Teams 已提供项目、任务、节点和原生会话入口时
 
 完成开发前，必须按变更影响确定必要测试范围并实际执行通过；写了测试/报告、仅编译或部分套件通过都不够。必要测试失败、跳过或未运行时用 `progress add` 报阻塞，不提交开发完成，也不以“已说明剩余限制”豁免；细则见 [回传字段](references/reporting.md)。
 
-功能开发获明确工作指令且必要单测通过后，仅在启动材料核验的任务 worktree/分支内提交本需求变更、推送并创建或更新以 `develop` 为 base 的 PR；先读 [提交与 PR 边界](references/reporting.md#提交与-pr-边界)。初始化预读、prepare 和仅打开 TUI 不授权提交。
+功能开发获明确工作指令且必要单测通过后，仅在启动材料核验的任务 worktree/分支内提交本需求变更、推送并创建或更新以启动材料核验的交付基线分支为 base 的 PR；先读 [提交与 PR 边界](references/reporting.md#提交与-pr-边界)。初始化预读、prepare 和仅打开 TUI 不授权提交。
 
 上游成果按合同通过后，下一节点知识会自动获取；等待该节点输入 ready 才采用和执行。会话可继续使用，但不自动连续执行全部节点。影响开发的未确认事项不能自行确认；节点成果只是交付人声明，不等于远端证据已核验。
 

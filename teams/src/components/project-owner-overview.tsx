@@ -1,3 +1,4 @@
+import { ProjectWorkspaceSummary } from './project-workspace-summary.js';
 import { displayText } from '../display-text.js';
 import '../project-overview.css';
 import { useState, type ReactNode } from 'react';
@@ -26,6 +27,7 @@ export function OwnerProjectOverview({ projectId, resources, skillContent, skill
   ];
   return <div className="page-stack project-owner-overview" data-owner-project={projectId}>
     <div className="overview-header"><span><strong>交付概览</strong>{origin}</span><Button onClick={() => setPanel('resources')}>项目资料</Button></div>
+    <ProjectWorkspaceSummary key={projectId} projectId={projectId}/>
     <div className="overview-metric-groups" aria-label="项目交付指标">{metricGroups.map(group => <section key={group.tab} className="overview-metric-group" data-overview-group={group.tab} aria-label={group.title}>
       <div className="overview-metric-heading"><h3>{group.title}</h3><span>{group.note}</span></div>
       <div className="overview-metrics">{group.metrics.map(metric => <Button key={metric.key} data-metric={metric.key} aria-label={metric.label} onClick={() => navigate(taskManagementRoute(projectId, group.tab, { filter: metric.key }))}><span>{metric.label}</span><strong>{model.counts[metric.key]}</strong></Button>)}</div>

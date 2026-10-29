@@ -1,3 +1,4 @@
+import {readProjectWorkspaces, saveProjectWorkspace} from './project-workspaces.js';
 import { readTaskArtifactContent } from './task-artifact-content.js';
 import { acquireTaskMaintenance } from './task-maintenance.js';
 import { projectModelContext } from './model-context.js';
@@ -125,6 +126,7 @@ const server = createServer(async (request, response) => {
       if(role!=='owner'&&role!=='member')throw new DomainError('请选择角色',400);
       json(200,await skillApplications.plan(role,scope as any));return;
     }
+    if (request.method === 'GET' && path === '/api/project-workspaces') {json(200,await readProjectWorkspaces(runtimeDir));return;}
     if (request.method === 'GET' && path === '/api/tools') { json(200, await toolsStatus()); return; }
     if (request.method === 'GET' && path === '/api/engine/locate') { json(200, await locateChrysEngine({ materialRoot })); return; }
     if (request.method === 'POST' && path.startsWith('/api/')) {
@@ -133,6 +135,10 @@ const server = createServer(async (request, response) => {
       }
       const body = await bodyJson(request);
       if (!body || !['owner', 'member'].includes(body.role)) throw new DomainError('请选择角色', 400);
+      if(path==='/api/project-workspaces'){
+        if(typeof body.projectId!=='string'||body.projectId!=='teams'&&!projectMembers(store.state,body.projectId).some(member=>member.id===body.role&&member.status==='active'))throw new DomainError('无权配置此项目工作区',403);
+        json(200,await store.exclusive(()=>saveProjectWorkspace(runtimeDir,join(root,'..'),{projectId:body.projectId,directory:body.directory,remoteUrl:body.remoteUrl,baseBranch:body.baseBranch})));return;
+      }
       if (path === '/api/action' && body.action === 'knowledge') throw new DomainError('项目知识由 Talents 发布后自动同步', 400);
       if (path === '/api/action' && ['candidate', 'evaluate', 'release', 'adopt'].includes(body.action)) throw new DomainError('能力演进已迁移到 Talents', 400);
       if (path === '/api/action') {

@@ -55,6 +55,11 @@ export class Store {
       migrateMainDelivery(this.state);validateDeliveryRequirements(this.state);await atomicJson(this.path,this.state);
     }
   }
+  /** Coordinates scoped filesystem work with the same state writer queue. Only commit writes state and updates memory. */
+  exclusive<T>(operation:(current:DemoState,commit:(next:DemoState)=>Promise<void>)=>Promise<T>):Promise<T>{
+    const next=this.queue.then(()=>operation(this.state,async state=>{await atomicJson(this.path,state);this.state=state;}));
+    this.queue=next.catch(()=>undefined);return next;
+  }
   mutate(revision: number, operation: (state: DemoState) => DemoState) {
     const next = this.queue.then(async () => {
       if (revision !== this.state.revision) throw new DomainError('另一页面已更新数据，请刷新后重试');
