@@ -256,7 +256,7 @@ function PrPicker({ repoId, initial, onDone, onClose }: { repoId: string; initia
 interface Preset { cap?: string; source?: string; from?: string; copy?: string }
 /** level: the team (null) or project the task belongs to; undefined lets the user choose (from 知识能力). */
 export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?: string | null; preset: Preset; onClose(): void; onCreated(id: string, started: boolean, level: string | null): void }) {
-  const { state: st, update, focusProject, startCodegraph, toast } = useTalents();
+  const { state: st, update, focusProject, startCodegraph, toast, teamsLink } = useTalents();
   // "重新提取" on an artifact: start from the task that built it.
   const fromArtifact = artifact(st, preset.from);
   const copied = task(st, preset.copy);
@@ -279,8 +279,11 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
 
   // A CodeGraph build runs now, in the repository as it is: it has no schedule and no update/rebuild choice.
   const onService = runsOnService(capId);
-  const own = levelSources(st, level), repos = own.filter(s => s.type === 'repo' && s.bound);
-  const pool = cap.input === 'docs' ? own.filter(s => s.type === 'docs') : cap.input === 'repo+pr' ? repos.filter(s => s.prs) : repos;
+  // Repositories not yet bound to a local directory in Teams are listed but cannot be chosen; once bound in Teams they
+  // become choosable here without reopening the form.
+  const own = levelSources(st, level);
+  const listed = cap.input === 'docs' ? own.filter(s => s.type === 'docs') : own.filter(s => s.type === 'repo' && (cap.input !== 'repo+pr' || s.prs));
+  const pool = listed.filter(s => s.type === 'docs' || s.bound), unbound = listed.filter(s => s.type === 'repo' && !s.bound);
   const src = cap.input === 'sessions' ? 's-sessions' : pool.some(s => s.id === chosen) ? chosen : pool[0]?.id ?? null;
   // Update vs rebuild: only when the capability declares an update and this input already has knowledge.
   const modeInfo = (() => {
@@ -289,7 +292,7 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
     return basis ? { artifact: a!, changes: changesSince(source(st, src), basis) } : null;
   })();
 
-  let ok = !!src, hint = src ? '' : cap.input !== 'docs' && own.some(s => s.type === 'repo' && !s.bound) && !repos.length ? '代码仓还没有在 iCode Teams 绑定本机目录'
+  let ok = !!src, hint = src ? '' : unbound.length ? '代码仓还没有在 iCode Teams 绑定本机目录'
     : levelName(st, level) + '还没有' + (cap.input === 'docs' ? '文档集' : cap.input === 'repo+pr' ? '有 PR 记录的代码仓' : '代码仓');
   if (modeInfo && mode === 'update' && schedule !== 'daily' && modeInfo.changes && !modeInfo.changes.count) { ok = false; hint = '来源没有变化，无需更新'; }
   if (cap.input === 'sessions') { ok = sessions.length > 0; hint = ok ? '' : '请选择会话'; }
@@ -343,7 +346,10 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
         {cap.input === 'sessions'
           ? pickRow(sessions.length ? '已选 ' + sessions.length + ' 个会话' : '还没有选择会话', sessions.length ? '重新选择' : '选择会话…', !sessions.length, () => setPicking('sessions'))
           : <div className="stack">
-            <Select value={src ?? undefined} onChange={v => { setChosen(v); setPrs([]); }} options={pool.map(s => ({ value: s.id, label: s.name }))} />
+            <Select value={src ?? undefined} onChange={v => { setChosen(v); setPrs([]); }} placeholder={unbound.length ? '没有已绑定本机目录的代码仓' : undefined}
+              options={listed.map(s => s.type === 'repo' && !s.bound ? { value: s.id, disabled: true, label: <>{s.name}<span className="caption"> · 未绑定本机目录</span></> } : { value: s.id, label: s.name })} />
+            {!src && unbound.length > 0 && level && <p className="ui-note">{unbound.map(s => s.name).join('、')} 还没有在 iCode Teams 绑定本机目录。
+              <a href={teamsLink(level) + '&workspace=settings'} target="_blank" rel="noreferrer">去 iCode Teams 绑定</a>，保存后这里自动更新。</p>}
             {cap.input === 'repo+pr' && pickRow(prs.length ? '已选 ' + prs.length + ' 个 PR：' + prs.map(n => '#' + n).join('、') : '还没有选择 PR', prs.length ? '重新选择' : '选择 PR…', !prs.length, () => setPicking('prs'))}
             {cap.input === 'repo+snippet' && <><Input value={scenario} onChange={e => setScenario(e.target.value)} placeholder="场景" />
               <Input.TextArea rows={2} value={snippets} onChange={e => setSnippets(e.target.value)} placeholder="代码片段文件，每行一个路径" /></>}
