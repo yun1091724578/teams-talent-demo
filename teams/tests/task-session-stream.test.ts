@@ -63,12 +63,12 @@ test('one native turn spanning nodes keeps its identity and only exposes message
     assert.deepEqual(prepare.turns[0].replies.map(m=>m.id),['reply-1']);assert.deepEqual(develop.turns[0].replies.map(m=>m.id),['reply-develop']);await assert.rejects(observe(f.state,'member',{...f.query,nodeId:'develop',cursor:first.cursor!}),/游标/);
   } finally { await f.cleanup(); }
 });
-test('partial active trace append waits; corruption and session identity mismatch remain explicit', async () => {
+test('partial active trace append waits; corruption degrades but session identity mismatch remains explicit', async () => {
   const f=await fixture();try{
     const observe=createTaskSessionStream(f.runtime,{isAlive:()=>true}),first=await observe(f.state,'owner',f.query),line=JSON.stringify(f.event('finish','turn.finished',4,{outcome:'success'}));
     await appendFile(f.trajectory,line.slice(0,20));assert.equal((await observe(f.state,'owner',{...f.query,cursor:first.cursor!})).turns.length,0);
     await appendFile(f.trajectory,line.slice(20)+'\n');assert.equal((await observe(f.state,'owner',{...f.query,cursor:first.cursor!})).turns[0].status,'ended');
-    await appendFile(f.trajectory,'{bad}\n');await assert.rejects(observe(f.state,'owner',f.query),/轨迹记录损坏/);
+    await appendFile(f.trajectory,'{bad}\n');const degraded=await observe(f.state,'owner',f.query);assert.equal(degraded.sessions[0].trajectory?.state,'degraded');assert.equal(degraded.sessions[0].trajectory?.reason,'corrupt_tail');assert.ok(degraded.turns.length>0);assert.match(degraded.sessions[0].note!,/任务进度不受影响/);
     await writeFile(f.trajectory,'');await writeFile(join(f.sessionDir,'session.json'),JSON.stringify({...f.document,meta:{session_id:randomUUID()}}));await assert.rejects(observe(f.state,'owner',f.query),/正文身份/);
   }finally{await f.cleanup();}
 });
@@ -135,7 +135,7 @@ test('an explicit hashed relocation preserves native evidence and rejects foreig
  }finally{await f.cleanup();}
 });
 
-test('large session and trajectory preserve paged visible turns; either over-limit candidate fails explicitly', async () => {
+test('large session preserves paged visible turns; oversized trajectory degrades without hiding the conversation', async () => {
  const f=await fixture();try{
   const observe=createTaskSessionStream(f.runtime,{isAlive:()=>true});
   for(let i=2;i<=141;i++){f.document.state.messages.push(message('user','large-user-'+i,i*2,'当前轮次 '+i));await appendFile(f.trajectory,JSON.stringify(f.event('large-turn-'+i,'turn.started',i*2,{turn_number:i,opening_item_id:'large-user-'+i},'large-turn-'+i))+'\n');}
@@ -151,6 +151,6 @@ test('large session and trajectory preserve paged visible turns; either over-lim
   const oversized=await open(recovery,'r+');try{await oversized.truncate(MAX_NATIVE_SESSION_BYTES+1);}finally{await oversized.close();}
   await assert.rejects(observe(f.state,'owner',f.query),{status:413,message:/32 MiB/});await rm(recovery);
   const trajectory=await open(f.trajectory,'r+');try{await trajectory.truncate(MAX_NATIVE_TRAJECTORY_BYTES+1);}finally{await trajectory.close();}
-  await assert.rejects(observe(f.state,'owner',f.query),{status:413,message:/64 MiB/});assert.equal(digest(await readFile(primary)),before);
+  const degraded=await observe(f.state,'owner',f.query);assert.equal(degraded.sessions[0].trajectory?.state,'degraded');assert.equal(degraded.sessions[0].trajectory?.reason,'too_large');assert.ok(degraded.turns.length>0);assert.equal(digest(await readFile(primary)),before);
  }finally{await f.cleanup();}
 });

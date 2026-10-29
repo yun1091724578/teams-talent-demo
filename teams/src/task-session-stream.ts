@@ -1,10 +1,11 @@
 import type { RequirementNode } from './delivery-requirements.js';
+import type { TrajectoryHealth } from './trajectory-health.js';
 
 export interface TaskSessionStreamQuery { projectId: string; taskId: string; nodeId: RequirementNode; sessionId?: string; cursor?: string }
 export type TaskSessionStatus = 'running' | 'completed' | 'failed' | 'unavailable' | 'unknown';
 export interface TaskSessionSummary {
   id: string; tool: 'icode' | 'opencode'; title: string; nodeIds: string[]; runIds: string[];
-  status: TaskSessionStatus; lastAt: string | null; note?: string;
+  status: TaskSessionStatus; lastAt: string | null; note?: string; trajectory?: TrajectoryHealth;
 }
 export interface TaskSessionMessage { id: string; at: string; text: string }
 export interface TaskSessionTurn {

@@ -1,4 +1,5 @@
 import { projectSessionTurns } from './task-session-turns.js';
+import { readTrajectoryHealth } from './trajectory-health.js';
 import { nativeSessionRootMatches } from './native-session-location.js';
 import { MAX_NATIVE_SESSION_BYTES, MAX_NATIVE_TRAJECTORY_BYTES } from './session-capacity.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,6 +10,7 @@ import { deliveryRequirement, type RequirementNode } from '../src/delivery-requi
 import { projectMembers } from '../src/teams-domain.js';
 import { taskVisibleTo } from '../src/task-visibility.js';
 import type { TaskSessionTurn, TaskSessionStreamQuery, TaskSessionStreamResponse, TaskSessionSummary } from '../src/task-session-stream.js';
+import type { TrajectoryHealth } from '../src/trajectory-health.js';
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const nodes = new Set(['prepare', 'develop', 'verify', 'accept']);
@@ -135,6 +137,7 @@ export function createTaskSessionStream(runtime: string, options: { isAlive?: (p
     const turns: TaskSessionTurn[] = [];
     for (const [runId, owner] of selected.runs) {
       const sessionDir = join(owner.sessionRoot, 'sessions', selected.id.replaceAll('-', '').slice(0, 12));
+      const health = await readTrajectoryHealth(sessionDir, selected.id);
       // Native iCode persists active checkpoints separately from settled turns.
       // Read both trusted files and select by native metadata; never hide a corrupt candidate.
       const primary = await readJson(root!, join(sessionDir, 'session.json'), MAX_NATIVE_SESSION_BYTES);
@@ -142,8 +145,15 @@ export function createTaskSessionStream(runtime: string, options: { isAlive?: (p
       for (const candidate of [primary, recovery]) if (candidate && (candidate.meta?.session_id !== selected.id || !Array.isArray(candidate.state?.messages))) throw new DomainError('原生会话正文身份或结构不匹配', 409);
       if (recovery && (!timestamp(recovery.meta.updated_at) || primary && !timestamp(primary.meta.updated_at))) throw new DomainError('原生会话持久化时间无效，未猜测应读取的版本', 409);
       const document = recovery && (!primary || Date.parse(recovery.meta.updated_at) > Date.parse(primary.meta.updated_at)) ? recovery : primary;
-      const trajectory = await readBounded(root!, join(sessionDir, 'trajectory', 'events.jsonl'), MAX_NATIVE_TRAJECTORY_BYTES);
+      let trajectory: string | null = null;
+      try { trajectory = await readBounded(root!, join(sessionDir, 'trajectory', 'events.jsonl'), MAX_NATIVE_TRAJECTORY_BYTES); }
+      catch (error) {
+        // A presentation read must not hide the conversation when only the log is unavailable.
+        if (!(error instanceof DomainError) || ![413, 503].includes(error.status)) throw error;
+        trajectory = null;
+      }
       const rows: Json[] = [];
+      let invalid = 0, partial = false;
       if (trajectory !== null) {
         const lines = trajectory.split('\n'), terminated = lines.at(-1) === '';
         if (terminated) lines.pop();
@@ -151,18 +161,30 @@ export function createTaskSessionStream(runtime: string, options: { isAlive?: (p
           let row: Json;
           try { row = JSON.parse(line); } catch {
             // Only a currently running writer may have an incomplete trailing JSON line.
-            if (!terminated && index === lines.length - 1 && selected.status === 'running') break;
-            throw new DomainError('原生轨迹记录损坏，未跳过错误记录', 409);
+            if (!terminated && index === lines.length - 1 && selected.status === 'running') { partial = true; break; }
+            invalid++; continue;
           }
-          if (row.session_id !== selected.id || typeof row.event_id !== 'string' || !timestamp(row.occurred_at)) throw new DomainError('原生轨迹身份或时间无效', 409);
+          if (row.session_id !== selected.id || typeof row.event_id !== 'string' || !timestamp(row.occurred_at)) { invalid++; continue; }
           rows.push(row);
         }
       }
+      const runHealth: TrajectoryHealth = health.state === 'degraded' || health.state === 'recovering'
+        ? health
+        : invalid ? { ...health, state: 'degraded', reason: 'corrupt_tail', eventCount: rows.length, diagnostic: '原生轨迹存在损坏行，已降级为对话视图；原始文件未修改。' }
+        : rows.length ? { ...health, state: 'healthy', eventCount: rows.length, lastEventAt: rows.reduce<string | null>((last, row) => !last || Date.parse(row.occurred_at) > Date.parse(last) ? row.occurred_at : last, null), ...(partial ? { diagnostic: '最后一行可能正在写入。' } : {}) }
+        : health;
+      selected.trajectory = !selected.trajectory || ({ degraded: 3, recovering: 2, healthy: 1, unknown: 0 } as const)[runHealth.state] > ({ degraded: 3, recovering: 2, healthy: 1, unknown: 0 } as const)[selected.trajectory.state] ? runHealth : selected.trajectory;
       const projected=projectSessionTurns({ document, rows, sessionId: selected.id, runId, nodeId: query.nodeId, status: selected.status, nodeAt: at => nodeAt(selected, runId, at), points: selected.points.filter(point => !point.runId || point.runId === runId), clean: visibleSessionText });
       // Resume carries the native conversation intact. Older turns remain attached
       // to their original run/node, rather than appearing again at the new node.
       turns.push(...projected.filter(turn=>!owner.preparedSession||Date.parse(turn.startedAt)>=Date.parse(owner.startedAt)));
       if (trajectory === null && document === null) { selected.note = selected.status === 'running' ? '会话已关联，等待原生进程保存对话正文' : '运行已有记录，但未记录可读取的对话正文'; const summary = summaries.find(item => item.id === selected.id); if (summary) summary.note = selected.note; }
+    }
+    if (selected.trajectory) { const summary = summaries.find(item => item.id === selected.id); if (summary) summary.trajectory = selected.trajectory; }
+    if (selected.trajectory?.state === 'degraded') {
+      const note = (selected.trajectory.diagnostic ?? '原生轨迹不可用。') + ' 会话过程仅展示对话正文；任务进度不受影响。';
+      selected.note = selected.note ? selected.note + ' ' + note : note;
+      const summary = summaries.find(item => item.id === selected.id); if (summary) { summary.trajectory = selected.trajectory; summary.note = selected.note; }
     }
     if (turns.length > 20000) throw new DomainError('当前节点对话轮次超过读取上限', 413);
     const current = new Map(turns.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.id.localeCompare(b.id)).map(turn => [turn.id, turn]));
