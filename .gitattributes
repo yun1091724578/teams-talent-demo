@@ -4,3 +4,7 @@
 /talents/content/four-requirements/** -text
 /shared/seed/talents/files/a-req-2026-*/** -text
 /teams/fixtures/skill-source-files.json -text
+
+# Fixed historical document/source samples are separate from live business checkouts.
+/teams/fixtures/project-documents/** -text
+/talents/tests/fixtures/carddemo-source-snapshot.json -text

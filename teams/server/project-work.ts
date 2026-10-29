@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DomainError, type DemoState, type Role } from '../src/domain.js';
@@ -8,12 +8,12 @@ import { deliveryRequirement, requirementNode, requireDeliveryMember } from '../
 import type { Presentation } from '../src/api.js';
 import type { ProjectWorkAction, ProjectWorkPlan, ProjectWorkReceipt, ProjectWorkSelection, ProjectWorkMode, ProjectWorkStart, ProjectWorkStatus } from '../src/project-work.js';
 import { nativeWorkDefaults, startNativeWork, startNativeCliWork } from './native.js';
-import { codeRoot, root, runtimeDir, sessionId, workspace, origin } from './config.js';
+import { root, runtimeDir, sessionId, origin } from './config.js';
 import { formatShellCommand } from './terminal-launcher.js';
 import { collaborationContext, collaborationSkillPath } from './collaboration-service.js';
 import { projectModelContext } from './model-context.js';
 import {configuredProjectWorkspace, verifyProjectWorkspace} from './project-workspaces.js';
-import { taskWorkDirectory, taskWorktreeBinding, ensureCarddemoTaskWorkspace } from './task-work-directory.js';
+import { taskWorkDirectory, taskWorktreeBinding, ensureTaskWorkspace } from './task-work-directory.js';
 import { atomicJson, atomicText } from './store.js';
 import { prepareNativeSession, type PreparationInput } from './native-session-preparation.js';
 import type { NativePreparationResult } from '../src/native-preparation.js';
@@ -108,7 +108,7 @@ export interface WorkTransport {
 }
 const nativeTransport: WorkTransport = {
   defaults: nativeWorkDefaults,
-  async history() { return { available: false, directory: workspace, title: '', active: null }; },
+  async history() { return { available: false, directory: '', title: '', active: null }; },
   start: startNativeWork,
   startCli: startNativeCliWork,
   focus: focusWorkTerminal,
@@ -131,7 +131,7 @@ export class ProjectWorkService {
       return task;
     };
     const task = verify(), target: ProjectWorkSelection = { ...scope, tab: 'delivery', nodeId: 'prepare' };
-    try { await ensureCarddemoTaskWorkspace(this.directory,scope,preparationId,this.workspaceRepo); } catch(error) { return {status:'waiting-directory',reason:(error as Error).message}; }
+    try { await ensureTaskWorkspace(this.directory,scope,preparationId,this.workspaceRepo); } catch(error) { return {status:'waiting-directory',reason:(error as Error).message}; }
     verify();
     const plan = await this.plan('owner', target, assigneeId);
     if (!plan.directory.valid || !plan.directory.root) return { status: 'waiting-directory', reason: plan.directory.diagnostic };
@@ -218,7 +218,7 @@ export class ProjectWorkService {
     let directory: ProjectWorkPlan['directory'];
     const preparedDirectory=requirement?taskAutomation(state,{projectId:requirement.projectId,taskId:requirement.id})?.preparation?.session?.directory:undefined;
     if (requirement) {
-      directory={root:preparedDirectory??requirement.workDirectory??null,valid:false,kind:'git-binding',diagnostic:'此需求尚未登记可工作的独立代码目录。'};
+      directory={root:preparedDirectory??requirement.workDirectory??null,valid:false,kind:'git-binding',diagnostic:'尚未配置项目工作区，请在项目概览设置独立仓库路径。'};
       try {
         if(preparedDirectory){
           directory.root=await realpath(preparedDirectory);
@@ -235,7 +235,6 @@ export class ProjectWorkService {
           else {
             const bindings=await this.bindings(),binding=bindings[directoryActorId+':'+work.target.projectId]??bindings['owner:'+work.target.projectId];
             if(binding){const repository=work.target.projectId==='teams'?'github.com/SEAL-iCode/iCode-teams':work.target.projectId==='carddemo'?binding:state.workspace.projects?.find(project=>project.id===work.target.projectId)?.remoteUrl??'';directory.root=await inspectDirectory(binding,repository,this.data.baseline.sourceRoot);directory.valid=true;directory.diagnostic='使用当前项目已核验的本机目录。';}
-            else if(work.target.projectId==='carddemo'){await access(join(codeRoot,'docs/design/08-marketing-capability.md'));directory={root:await realpath(codeRoot),valid:true,kind:'imported-snapshot',diagnostic:'使用信用卡项目已核验的默认源码目录；初始化仅只读。'};}
           }
         }
       } catch(error){directory.valid=false;directory.diagnostic=(error as Error).message;}
@@ -244,13 +243,10 @@ export class ProjectWorkService {
       directory={root:configured!.directory,valid:false,kind:'git-binding',diagnostic:'项目工作区待核验'};
       try {await verifyProjectWorkspace(configured!);directory.valid=true;directory.diagnostic='使用 项目概览配置的独立项目仓库。';}
       catch(error){directory.diagnostic=(error as Error).message;}
-    } else if (work.target.projectId === 'carddemo') {
-      await access(join(codeRoot, 'docs/design/08-marketing-capability.md'));
-      directory = { root: await realpath(codeRoot), valid: true, kind: 'imported-snapshot', diagnostic: '已核验本机导入源码快照；该快照没有 .git，不宣称已完成生产仓库绑定。' };
     } else {
       const binding = (await this.bindings())[role + ':' + work.target.projectId];
-      directory = { root: binding ?? null, valid: false, kind: 'git-binding', diagnostic: '尚未绑定本机目录，请先核验并关联一个与项目代码仓一致的 checkout/worktree。' };
-      if (binding) try { directory.root = await inspectDirectory(binding, work.repository, this.data.baseline.sourceRoot); directory.valid = true; directory.diagnostic = '本机仓库根目录与项目 origin 已核验。'; } catch (error) { directory.diagnostic = (error as Error).message; }
+      directory = { root: binding ?? null, valid: false, kind: 'git-binding', diagnostic: '尚未配置项目工作区，请在项目概览设置独立仓库路径。' };
+      if (binding) try { directory.root = await inspectDirectory(binding, work.target.projectId==='carddemo'?binding:work.repository, this.data.baseline.sourceRoot); directory.valid = true; directory.diagnostic = '本机仓库根目录与项目 origin 已核验。'; } catch (error) { directory.diagnostic = (error as Error).message; }
     }
     const defaults = await this.transport.defaults();
     const frozen = requirement ? !!requirement.preparedAt : work.target.projectId === 'carddemo' && !!work.target.taskId && !!state.context;
@@ -281,7 +277,6 @@ export class ProjectWorkService {
   private async bindDirectory(role: Role, input: ProjectWorkSelection, directory: string) {
     const work = resolveProjectWork(this.current(), this.data, input);
     const task=deliveryRequirement(this.current(),input.projectId,input.taskId);
-    if (work.target.projectId === 'carddemo' && !await configuredProjectWorkspace(this.directory,'carddemo') && (!task || task.id==='DEMO-MKT-001')) throw new DomainError('CardDemo 主任务使用已经核验的导入源码位置');
     const repository=task ? task.workDirectory ?? (input.projectId==='teams'?'github.com/SEAL-iCode/iCode-teams':input.projectId==='carddemo'?directory:this.current().workspace.projects?.find(project=>project.id===input.projectId)?.remoteUrl??'') : work.repository;
     const canonical = await inspectDirectory(directory, repository, this.data.baseline.sourceRoot);
     const bindings = await this.bindings(); bindings[role + ':' + input.projectId] = canonical;

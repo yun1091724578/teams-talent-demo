@@ -176,11 +176,11 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
                 { category: 'plugin', label: 'Plugin', description: '工具原生扩展', unavailableReason: tool === 'opencode' ? '原生 Plugin 尚未连接' : '当前 iCode 适配器未开放 Plugin 管理' },
               ],
               startup: {
-                cwd: current.icode.workspace,
+                cwd: current.icode.workspace ?? '',
                 terminals: current.terminals ?? [], selectedTerminal: current.selectedTerminal,
                 launchLabel: `启动 ${names[tool]}`,
                 hint: current.terminalError ?? `新建会话使用 ${current.terminalName}；项目和需求入口共用此本机偏好。`,
-                disabledReason: current.terminalError ?? (found.installed ? undefined : tool === 'opencode' && current.opencode.unsupportedReason ? current.opencode.unsupportedReason : '当前设备尚未发现此工具。'),
+                disabledReason: current.workspaceError ?? current.terminalError ?? (found.installed ? undefined : tool === 'opencode' && current.opencode.unsupportedReason ? current.opencode.unsupportedReason : '当前设备尚未发现此工具。'),
                 async chooseDirectory(cwd) {return new Promise(resolve=>{let value=cwd??'';Modal.confirm({title:'项目工作目录',content:<Input defaultValue={value} onChange={event=>{value=event.target.value;}} placeholder="输入本机 Git 仓库绝对路径"/>,onOk(){resolve({cancelled:false,cwd:value});},onCancel(){resolve({cancelled:true});}});});},
                 async selectTerminal(terminal) { await native(latest.current.role, 'terminal', { terminal }); statusPromise = undefined; },
                 async launch(input) {

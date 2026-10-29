@@ -62,8 +62,8 @@ export const sourceAssetId = (pluginId: SourcePluginId, projectId: SourceProject
 const cardRequirement = sourceAssetId('requirements', 'carddemo', 'DEMO-MKT-001');
 const teamRequirement = (id: string) => sourceAssetId('requirements', 'teams', id);
 const marketingDesign = 'teams/docs/cashback-contract.md';
-const marketingIntegration = 'workspace/carddemo-java-1025/docs/design/adr/ADR-009-marketing-integration.md';
-const authenticationScope = 'workspace/carddemo-java-1025/docs/design/adr/ADR-007-authentication-scope.md';
+const marketingIntegration = 'teams/fixtures/project-documents/carddemo/docs/design/adr/ADR-009-marketing-integration.md';
+const authenticationScope = 'teams/fixtures/project-documents/carddemo/docs/design/adr/ADR-007-authentication-scope.md';
 const localFile = (collection: SourceAssetReference['collection'], path: string, label: string): SourceAssetReference => ({
   collection, path, label, extent: collection === 'graph' ? 'excerpt' : 'full-file', origin: 'existing-local-file',
 });
@@ -126,15 +126,15 @@ function repositoryAssets(data: SourcePluginData): readonly SourcePluginAsset[] 
   const repo = data.teamsProject.project.repos[0];
   return [
     card({
-      sourceRecordId: 'carddemo-java-1025', kind: 'repository', title: '白金卡返现规则',
-      summary: '当前返现规则及本地协作流程源码。', version: '当前规则版本',
-      detail: '逻辑位置：teams/src/cashback.ts 与 teams/src/domain.ts\n范围：卡片资格、期间、金额计算和工作流状态。\nJava 快照仅是保留的来源资料，不是当前规则的运行实现。',
+      sourceRecordId: 'carddemo-java-1025', kind: 'repository', title: 'CardDemo 业务代码仓库',
+      summary: '独立 GitHub 仓库，本机路径由项目工作区配置。', version: '项目工作区配置',
+      detail: '仓库：https://github.com/JeffyLiu003/carddemo-java-1025.git\n本机目录、交付基线和任务分支以项目工作区配置及绑定为准。知识中的源码节选是固定历史样本，不代表当前业务仓库版本。',
       relatedRequirementIds: [cardRequirement],
     }),
     ...(data.graph ?? []).map(source => card({
       sourceRecordId: `code-${source.id}`, kind: 'code', title: `${source.name} · 源码`,
-      summary: source.file, version: '当前源码节选',
-      detail: `当前规则源码\n文件：${source.file}\n记录引用当前当前源码节选。`,
+      summary: source.file, version: '历史源码节选',
+      detail: `历史规则源码样本\n文件：${source.file}\n固定样本，仅用于知识展示。`,
       references: [localFile('graph', source.file, '阅读已有源码节选')], relatedRequirementIds: [cardRequirement],
     })),
     asset(data, 'repository', 'teams', {

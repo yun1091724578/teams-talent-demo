@@ -2,7 +2,9 @@ import { Button, Descriptions, Space } from 'antd';
 import { useDemo } from '../context.js';
 import { displayRequirementId, displayText } from '../display-text.js';
 import type { OverviewRequirement } from '../project-overview.js';
-import { deliveryRequirement } from '../delivery-requirements.js';
+import { RequirementDelete } from './requirement-delete.js';
+import { taskManagementRoute } from './project-task-shared.js';
+import { deliveryRequirement, mainRequirementId } from '../delivery-requirements.js';
 import { TaskAssignment } from './task-assignment.js';
 import { taskExecutableBy, taskVisibleTo } from '../task-visibility.js';
 export const requirementPhaseLabel = (phase: string) => ({ '待开展': '待开始', '准备': '需求澄清', '开发': '功能开发', '验证': '测试验证' }[phase] ?? phase);
@@ -23,5 +25,6 @@ export function RequirementDetail({ projectId, item }: { projectId: string; item
     ]} />
     {!local && item.source.origin!=='teams-task' && <p className="muted">{projectId === 'teams' ? '原项目任务记录只读，交付人和状态沿用来源。' : '此需求保留来源记录，尚未创建本地交付任务。'}</p>}
     <Space wrap>{local && item.pendingConfirmation && <TaskAssignment key={projectId + ':' + item.taskId + ':' + role} projectId={projectId} taskId={item.taskId!} />}{route && <Button type="primary" aria-label={nextLabel} onClick={() => navigate(route)}>{nextLabel}</Button>}<Button type="link" size="small" onClick={() => showText(item.source.title + ' · 来源原文', displayText(item.source.detail))}>查看来源</Button></Space>
+    {local && !(projectId==='carddemo'&&item.taskId===mainRequirementId) && <div><RequirementDelete projectId={projectId} taskId={item.taskId!} title={item.source.title} onDeleted={()=>navigate(taskManagementRoute(projectId,'requirements'))} /></div>}
   </div>;
 }

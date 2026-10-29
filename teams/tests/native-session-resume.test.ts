@@ -11,7 +11,6 @@ import { createDeliveryRequirement } from '../src/delivery-requirements.js';
 import { queueTaskPreparation, taskAutomation } from '../src/task-automation.js';
 import { ProjectWorkService, type WorkTransport } from '../server/project-work.js';
 import { readFixtures } from '../server/http-shared.js';
-import { codeRoot } from '../server/config.js';
 import { nativeProcessActive } from '../scripts/native/session-liveness.mjs';
 import { focusWorkTerminal } from '../server/terminal-focus.js';
 // @ts-ignore the TUI bridge also runs directly under Node.
@@ -42,7 +41,7 @@ test('prepared TUI focuses a live exact terminal, then restores latest saved dia
   await put(source, 'session-root/sessions/' + short + '/session.json', initial);
   await put(source, 'native-session.json', { runId: initialRun, ...scope, sessionId, sessionRoot: join(source, 'session-root'), pid: 2147483646, startedAt: now });
   await put(source, 'result.json', { runId: initialRun, sessionId, status: 'completed' });
-  preparation.status = 'ready'; preparation.session = { status: 'ready', runId: initialRun, sessionId, directory: await realpath(codeRoot), preparedAt: now, contextPath: '/context', contextSha256: sha('context'), skillPath: '/skill', sessionSha256: sha(initial), agent: 'code', agentLabel: 'Code', model: 'model', modelLabel: 'Model', readEvidence: [{ path: '/context', callId: 'read', sha256: sha('context') }], summary: '已读取' };
+  preparation.status = 'ready'; preparation.session = { status: 'ready', runId: initialRun, sessionId, directory: dir, preparedAt: now, contextPath: '/context', contextSha256: sha('context'), skillPath: '/skill', sessionSha256: sha(initial), agent: 'code', agentLabel: 'Code', model: 'model', modelLabel: 'Model', readEvidence: [{ path: '/context', callId: 'read', sha256: sha('context') }], summary: '已读取' };
   const startedAt = new Date().toISOString(), child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
   await once(child, 'spawn');
   const owner = { runId: resumedRun, ...scope, nodeId: 'prepare', sessionId, sessionRoot: join(output, 'session-root'), pid: child.pid!, startedAt: new Date().toISOString(), executionMode: 'interactive' };

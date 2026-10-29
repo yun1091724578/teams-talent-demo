@@ -52,9 +52,9 @@
         {
           "id": "repository:carddemo:carddemo-java-1025",
           "name": "carddemo-java-1025",
-          "path": "workspace/carddemo-java-1025",
           "branch": "main",
-          "description": "Java 21 微服务：7 个服务和 Web UI"
+          "description": "Java 21 微服务：7 个服务和 Web UI",
+          "remote": "https://github.com/JeffyLiu003/carddemo-java-1025.git"
         }
       ],
       "documents": [
@@ -67,13 +67,13 @@
         {
           "id": "design-library:carddemo:ADR-009",
           "title": "交易处理边界",
-          "path": "workspace/carddemo-java-1025/docs/design/adr/ADR-009-marketing-integration.md",
+          "path": "teams/fixtures/project-documents/carddemo/docs/design/adr/ADR-009-marketing-integration.md",
           "summary": "交易入账与营销评估之间的调用、提交及重试约定。"
         },
         {
           "id": "design-library:carddemo:ADR-007",
           "title": "权限与安全范围",
-          "path": "workspace/carddemo-java-1025/docs/design/adr/ADR-007-authentication-scope.md",
+          "path": "teams/fixtures/project-documents/carddemo/docs/design/adr/ADR-007-authentication-scope.md",
           "summary": "已有系统的认证范围与限制说明；属于设计资料。"
         }
       ],

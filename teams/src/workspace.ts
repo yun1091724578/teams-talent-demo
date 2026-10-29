@@ -1,3 +1,4 @@
+import type {TaskDeletionReceipt} from './task-deletion.js';
 import { createProjectIssue, type ProjectIssue } from './project-issues.js';
 import { deliveryRequirement, type DeliveryRequirement } from './delivery-requirements.js';
 import { userSkillExamples } from './project-skill-examples.js';
@@ -18,6 +19,7 @@ import type { CollaborationState } from './collaboration.js';
 export interface Asset { id: string; title: string; kind: string; location: string; sourceAssetId?: string }
 export interface Material { id: string; title: string; body: string }
 export interface WorkspaceState {
+  taskDeletions?:TaskDeletionReceipt[];
   projectIssues?: ProjectIssue[];
   deliveryRequirements?: DeliveryRequirement[];
   teams?: TeamRecord[];
@@ -42,12 +44,12 @@ export const defaultSkills = projectSkillIds;
 export function initialWorkspace(): WorkspaceState {
   return {
     acquiredResources:[],project: { name: 'Credit Card', description: '针对白金卡客户未来 3 个月的消费，额外增加 0.5% 的消费返现。', repository: 'carddemo-java-1025', assets: [
-      { id:'code',title:'白金卡返现规则',kind:'repository',location:'teams/src/cashback.ts',sourceAssetId:'repository:carddemo:carddemo-java-1025' },
+      { id:'code',title:'CardDemo 业务代码仓库',kind:'repository',location:'https://github.com/JeffyLiu003/carddemo-java-1025.git',sourceAssetId:'repository:carddemo:carddemo-java-1025' },
       { id:'design',title:'消费返现规则',kind:'document',location:'teams/docs/cashback-contract.md',sourceAssetId:'design-library:carddemo:marketing-capability' },
 
       { id:'history',title:'白金卡消费返现需求',kind:'requirement',location:'requirements:carddemo:DEMO-MKT-001' },
-      { id:'adr',title:'交易处理边界',kind:'document',location:'workspace/carddemo-java-1025/docs/design/adr/ADR-009-marketing-integration.md',sourceAssetId:'design-library:carddemo:ADR-009' },
-      { id:'security',title:'权限与安全范围',kind:'document',location:'workspace/carddemo-java-1025/docs/design/adr/ADR-007-authentication-scope.md',sourceAssetId:'design-library:carddemo:ADR-007' },
+      { id:'adr',title:'交易处理边界',kind:'document',location:'teams/fixtures/project-documents/carddemo/docs/design/adr/ADR-009-marketing-integration.md',sourceAssetId:'design-library:carddemo:ADR-009' },
+      { id:'security',title:'权限与安全范围',kind:'document',location:'teams/fixtures/project-documents/carddemo/docs/design/adr/ADR-007-authentication-scope.md',sourceAssetId:'design-library:carddemo:ADR-007' },
     ] }, materials: [], selectedSkills: [...defaultSkills], progress: [], sessionReported:false, reportAt:null,
     analysis:{scope:'single',status:'idle'}, foundation:{progressEnabled:true,uploadEnabled:true},
     team:{ name:'信用卡研发团队',members:[['owner','林悦'],['member','陈晨'],['su','苏晴'],['yang','杨帆'],['zhao','赵宁'],['wang','王晓']].map(([id,name])=>({id,name,role:id==='owner'?'owner':'member',status:'active'})) },

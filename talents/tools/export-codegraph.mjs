@@ -5,11 +5,13 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, renameSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
-import { dirname, resolve, relative, sep } from 'node:path';
+import { dirname, resolve, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const project = resolve(root, 'workspace/carddemo-java-1025');
+const args=process.argv.slice(2);
+if(args.length!==2||args[0]!=='--project'||!isAbsolute(args[1]))throw new Error('用法：node talents/tools/export-codegraph.mjs --project <独立业务仓库绝对路径>');
+const project=resolve(args[1]);
 const output = resolve(root, 'talents/data/codegraph');
 const temp = mkdtempSync(resolve(tmpdir(), 'carddemo-codegraph-'));
 const databasePath = resolve(temp, 'codegraph.db');

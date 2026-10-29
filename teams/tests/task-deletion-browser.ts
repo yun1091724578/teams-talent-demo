@@ -1,0 +1,30 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,realpath,rm,readFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+const runtime=await realpath(await mkdtemp(join(tmpdir(),'teams-delete-browser-'))),origin='http://127.0.0.1:46047';
+const server=spawn(process.execPath,['--import','tsx','server/index.ts'],{env:{...process.env,DEMO_PORT:'46047',DEMO_TALENT_PORT:'46048',DEMO_STATE_DIR:runtime,DEMO_SHARED_DIR:join(runtime,'shared'),DEMO_SHARED_SEED_DIR:join(runtime,'no-seed'),DEMO_NATIVE_DISABLED:'1'},stdio:['ignore','pipe','pipe']});
+let logs='',browser;server.stdout.on('data',chunk=>logs+=chunk);server.stderr.on('data',chunk=>logs+=chunk);
+try{
+ let ready=false;for(let i=0;i<100;i++){try{if((await fetch(origin+'/api/health')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
+ const {token}=await(await fetch(origin+'/api/session')).json(),state=async()=>await(await fetch(origin+'/api/state')).json(),headers={origin,'content-type':'application/json','x-demo-token':token};
+ const id='REQ-'+randomUUID(),title='删除入口隔离验证';
+ const created=await fetch(origin+'/api/delivery-requirements',{method:'POST',headers,body:JSON.stringify({role:'owner',revision:(await state()).revision,action:'create',input:{projectId:'carddemo',id,title,description:'仅验证需求删除，不启动原生会话',assigneeId:''}})});assert.equal(created.status,200,await created.text());
+ browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(10000);const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('response',response=>{if(response.url().includes('/delete-plan')&&!response.ok())void response.text().then(body=>console.error('Delete plan failed: '+body));});
+ await page.goto(origin+'/teams#/projects?project=carddemo&tab=management');await page.getByRole('button',{name:title,exact:true}).click();
+ const listCount=Number(await page.locator('[data-list-total]').getAttribute('data-list-total'));
+ const before=await state();await page.getByRole('button',{name:'删除需求',exact:true}).click();const dialog=page.getByRole('dialog',{name:'删除需求'}),confirm=dialog.getByRole('button',{name:'确认删除需求',exact:true});await confirm.waitFor();await page.waitForFunction(()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('.ant-modal button')].find(item=>item.textContent?.includes('确认删除需求'));return button&&!button.disabled;});
+ await dialog.getByRole('button',{name:/取\s*消/}).click();assert.deepEqual(await state(),before);
+ await page.getByRole('button',{name:'删除需求',exact:true}).click();await confirm.waitFor();await page.waitForFunction(()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('.ant-modal button')].find(item=>item.textContent?.includes('确认删除需求'));return button&&!button.disabled;});
+ const plan=await(await fetch(origin+'/api/delivery-requirements/delete-plan?'+new URLSearchParams({role:'owner',projectId:'carddemo',taskId:id}))).json();
+ const forbidden=await fetch(origin+'/api/delivery-requirements/delete',{method:'POST',headers,body:JSON.stringify({role:'member',projectId:'carddemo',taskId:id,planToken:plan.planToken,revision:plan.revision,operationId:randomUUID()})});assert.equal(forbidden.status,403);assert.ok((await state()).workspace.deliveryRequirements.some((task:any)=>task.id===id));
+ await page.screenshot({path:'/tmp/teams-requirement-delete-confirmation.png'});
+ await confirm.click();await dialog.waitFor({state:'hidden'});await page.getByRole('button',{name:title,exact:true}).waitFor({state:'hidden'});
+ assert.equal(Number(await page.locator('[data-list-total]').getAttribute('data-list-total')),listCount-1);
+ assert.ok(!(await state()).workspace.deliveryRequirements.some((task:any)=>task.id===id));await page.reload();assert.equal(await page.getByRole('button',{name:title,exact:true}).count(),0);
+ const receipt=(await state()).workspace.taskDeletions.at(-1);assert.equal(receipt.taskId,id);assert.equal(JSON.parse(await readFile(join(runtime,'task-reset-backups',receipt.backupId,'manifest.json'),'utf8')).status,'applied');
+ await page.screenshot({path:join(runtime,'deleted.png')});assert.deepEqual(errors,[]);console.log('PASS: Owner detail button, cancellation, member API rejection, scoped deletion, durable receipt and refreshed lists');
+}catch(error){if(browser){const page=browser.contexts()[0]?.pages()[0];if(page){await page.screenshot({path:'/tmp/teams-deletion-browser-failure.png'});console.error((await page.locator('body').innerText()).slice(-3000));}}throw error;}finally{await browser?.close();if(server.exitCode===null){server.kill('SIGTERM');await new Promise<void>(resolve=>{server.once('exit',()=>resolve());setTimeout(()=>server.kill('SIGKILL'),5000).unref();});}await rm(runtime,{recursive:true,force:true});}

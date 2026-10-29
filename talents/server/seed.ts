@@ -66,7 +66,7 @@ export function seedState(): TalentsState {
     ],
     // Talents' mock metadata about sources Teams owns; versions newest first.
     sourceMeta: {
-      [REPO_ID]: { origin: 'git@code.bank.local:carddemo/carddemo-java-1025.git', prs: 66,
+      [REPO_ID]: { origin: 'https://github.com/JeffyLiu003/carddemo-java-1025.git', prs: 66,
         commit: { sha: '4e1b7c2', message: '返现失败保留 PENDING 并支持人工重试 (#66)', time: '2026-10-24 15:58' } },
       [DOCSET_ID]: { lastCheck: '2026-10-27 09:05',
         versions: [

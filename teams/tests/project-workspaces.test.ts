@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { readProjectWorkspaces, saveProjectWorkspace, ensureProjectTaskWorkspace, readProjectTaskBinding, verifyProjectWorkspace } from '../server/project-workspaces.js';
-import { taskWorkDirectory, ensureCarddemoTaskWorkspace } from '../server/task-work-directory.js';
+import { taskWorkDirectory, ensureTaskWorkspace } from '../server/task-work-directory.js';
 
 const git = (directory: string, args: string[]) => execFileSync('git', ['-C',directory,...args], {encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
 const remoteUrl='https://github.com/JeffyLiu003/carddemo-java-1025.git';
@@ -44,7 +44,7 @@ test('external configuration survives reload, validates origin/base and never ch
 test('preparation creates isolated worktree in business repo; reuse and subsequent workspace edits preserve pinned task',async()=>fixture(async f=>{
   await saveProjectWorkspace(f.runtime,f.platform,f.input);await writeFile(join(f.business,'README.md'),'uncommitted business');
   const before=await readFile(join(f.runtime,'state.json'));
-  const [one,two]=await Promise.all([ensureCarddemoTaskWorkspace(f.runtime,{projectId:'carddemo',taskId:f.task.id},f.preparationId,f.platform),ensureCarddemoTaskWorkspace(f.runtime,{projectId:'carddemo',taskId:f.task.id},f.preparationId,f.platform)]);
+  const [one,two]=await Promise.all([ensureTaskWorkspace(f.runtime,{projectId:'carddemo',taskId:f.task.id},f.preparationId,f.platform),ensureTaskWorkspace(f.runtime,{projectId:'carddemo',taskId:f.task.id},f.preparationId,f.platform)]);
   assert.ok(one);assert.equal(one.directory,two!.directory);assert.notEqual(one.directory,f.business);
   assert.equal(git(one.directory,['remote','get-url','origin']),remoteUrl);
   assert.equal(await realpath(git(one.directory,['rev-parse','--show-toplevel'])),one.directory);
@@ -111,4 +111,13 @@ test('old prepared session keeps original cwd after default workspace changes',a
   await writeFile(join(f.runtime,'state.json'),JSON.stringify(f.state));
   assert.equal(await taskWorkDirectory(f.runtime,f.task,f.platform),original);
   await assert.rejects(ensureProjectTaskWorkspace(f.runtime,f.task,f.preparationId),/任务已开始/);
+}));
+
+
+test('a distributed Teams folder needs no Git metadata; the configured business checkout still does',async()=>fixture(async f=>{
+ const distribution=join(f.temp,'Teams distribution');await mkdir(distribution);
+ const config=await saveProjectWorkspace(f.runtime,distribution,f.input);assert.equal(config.projects[0].directory,f.business);
+ const notGit=join(f.temp,'not-a-checkout');await mkdir(notGit);
+ await assert.rejects(saveProjectWorkspace(f.runtime,distribution,{...f.input,directory:notGit}));
+ assert.deepEqual(await readProjectWorkspaces(f.runtime),config);
 }));

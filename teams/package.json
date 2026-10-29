@@ -12,6 +12,7 @@
     "stop": "node scripts/stop.mjs",
     "stop:teams": "node scripts/stop.mjs",
     "dev": "npm run build && npm start",
+    "reset:task": "node --import tsx scripts/reset-task.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:e2e": "tsx tests/browser.ts",

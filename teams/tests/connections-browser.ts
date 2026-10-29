@@ -24,7 +24,7 @@ try{
   assert.equal(await page.locator('[data-platform="business-knowledge"]').count(),0,'business knowledge is shown on the project knowledge page, not as a source plugin');assert.equal(await page.getByText('业务知识（Talent）',{exact:true}).count(),0);
   assert.equal(await page.locator('[data-platform="requirements"]').getByRole('button',{name:'在项目中使用',exact:true}).isEnabled(),false);
   const checks=[
-    ['repository','代码托管平台','白金卡返现规则','carddemo-java-1025',6],
+    ['repository','代码托管平台','CardDemo 业务代码仓库','carddemo-java-1025',6],
     ['requirements','需求平台','信用卡消费返现','MKT-001',11],
     ['defects','缺陷平台','普通卡不应进入白金卡返现范围','CARD-BUG-001',8],
     ['design-library','设计文档 / 知识库','营销能力设计','marketing-capability',7],

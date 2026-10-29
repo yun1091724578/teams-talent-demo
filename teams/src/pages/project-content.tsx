@@ -22,7 +22,6 @@ export function ProjectContent() {
     information={[
       { key: 'team', label: '所属团队', children: projectTeam(state, 'carddemo').name }, { key: 'owner', label: '项目 Owner', children: '林悦' },
       { key: 'repository', label: '主仓', span: 2, children: <Mono>{state.workspace.project.repository}</Mono> },
-      { key: 'directory', label: '本机目录', span: 2, children: 'carddemo-java-1025 · 通过顶部 iCode 作业入口核验本机路径' },
     ]}
     members={<><Descriptions size="small" column={1} items={[{ key: 'owner', label: '林悦 · 项目 Owner', children: '项目资产与知识、需求分配、质量能力、验收及演进' }, { key: 'member', label: (projectMembers(state, 'carddemo').filter(member => member.status === 'active' && member.role === 'member').map(member => member.name).join('、') || '尚无成员') + ' · 项目成员', children: '需求上下文、开发、验证、交付与会话关联' }]} /><Button onClick={() => navigate('team?team=' + projectTeam(state, 'carddemo').id)}>查看团队成员</Button></>}
     assets={<ProjectAssets projectId="carddemo" />}

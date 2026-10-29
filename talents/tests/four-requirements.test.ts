@@ -1,3 +1,4 @@
+import {historicalSourceBytes} from './historical-source.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';
@@ -30,7 +31,7 @@ test('all raw documents, profile and provenance survive export unchanged with fi
   assert.equal(manifest.sourceSha256,s.sourceSha256);assert.equal(manifest.businessId,s.businessId);assert.equal(manifest.testProfile.version,'test-profile-v1');
   for(const file of manifest.knowledgeFiles){const raw=await readFile(join(contentDir,file.path));assert.equal(hash(raw),file.sha256);assert.equal(files.find(f=>f.path===file.path)!.text,raw.toString('utf8'));}
   const original=await readFile(join(contentDir,s.files.requirement),'utf8');assert.equal(hash(original),s.sourceSha256);assert.match(original,/## 13\. 合规标注/);assert.match(original,/### 12\.3 待确认事项/);
-  for(const file of manifest.sourceFiles)assert.equal(hash(execFileSync('git',['show',file.commit+':'+file.path],{cwd:repositoryRoot})),file.sha256);
+  for(const file of manifest.sourceFiles)assert.equal(hash(historicalSourceBytes(file)),file.sha256);
   const profile=await readFile(join(contentDir,s.files.profile),'utf8');assert.match(profile,/19\.25/);assert.match(profile,/审批来源：用户 2026-10-28/);assert.equal(hash(profile),manifest.testProfile.sha256);
  }
 });

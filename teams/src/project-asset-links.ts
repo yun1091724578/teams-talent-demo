@@ -3,7 +3,7 @@ import type { Asset } from './workspace.js';
 /** Exact existing references are projected without migrating saved state. */
 export function legacyAssetSourceIds(asset: Asset): string[] {
   if (asset.sourceAssetId) return [asset.sourceAssetId];
-  if (asset.id === 'code' && asset.location === 'workspace/carddemo-java-1025') return ['repository:carddemo:carddemo-java-1025'];
+  if (asset.id === 'code' && asset.location === 'https://github.com/JeffyLiu003/carddemo-java-1025.git') return ['repository:carddemo:carddemo-java-1025'];
   if (asset.id === 'design' && asset.location === 'docs/design/08-marketing-capability.md') return ['design-library:carddemo:marketing-capability'];
   if (asset.id === 'adr' && asset.location === 'ADR-009 / ADR-007') return ['design-library:carddemo:ADR-009', 'design-library:carddemo:ADR-007'];
   return [];

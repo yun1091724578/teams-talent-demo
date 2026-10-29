@@ -23,10 +23,11 @@ export function NativeControls({ compact = false }: { compact?: boolean }) {
     {!compact && <Descriptions column={1} size="small" items={[
       { key: 'version', label: '配套实例', children: status?.icode.version ?? '正在探测…' },
       { key: 'source', label: '发现方式', children: status?.icode.source === 'official' ? '官方安装位置自动发现' : status?.icode.source === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : status?.icode.source === 'bundled' ? '仓库内开发包' : status?.icode.source === 'missing' ? '未发现可用安装' : '正在探测…' },
-      { key: 'directory', label: '项目工作目录', children: <Mono>{status?.icode.workspace ?? '正在读取…'}</Mono> },
+      { key: 'directory', label: '项目工作目录', children: <Mono>{status ? status.icode.workspace ?? '尚未配置项目工作区' : '正在读取…'}</Mono> },
     ]} />}
+    {status?.workspaceError && <Alert type="info" title="需要配置项目工作区" description={status.workspaceError} />}
     {!!status?.icode.notes?.length && <Alert type="warning" title="iCode 探测说明" description={status.icode.notes.join('；')} />}
-    <Space wrap><Button type="primary" icon={<CodeOutlined />} loading={pending === 'start'} disabled={!status?.icode.installed || !!pending} onClick={() => void launch()}>启动 iCode</Button><Button onClick={() => { setError(''); void getEngineLocation().then(value => showText('chrys.engine.locate', JSON.stringify(value, null, 2))).catch(e => setError((e as Error).message)); }}>引擎定位</Button>{state.context && <><Button onClick={() => void context()}>导出作业上下文</Button><Button onClick={() => void copyContext()}>复制上下文指令</Button></>}</Space>
+    <Space wrap><Button type="primary" icon={<CodeOutlined />} loading={pending === 'start'} disabled={!status?.icode.installed || !status.icode.workspace || !!pending} onClick={() => void launch()}>启动 iCode</Button><Button onClick={() => { setError(''); void getEngineLocation().then(value => showText('chrys.engine.locate', JSON.stringify(value, null, 2))).catch(e => setError((e as Error).message)); }}>引擎定位</Button>{state.context && <><Button onClick={() => void context()}>导出作业上下文</Button><Button onClick={() => void copyContext()}>复制上下文指令</Button></>}</Space>
     {error && <Alert type="error" title="本机操作未完成" description={error} showIcon />}
     {receipt && <Alert type="success" showIcon title={'已请求 ' + (receipt.terminal ?? '本机终端') + ' 打开工具'} description={receipt.note} />}
     <p className="muted native-note">启动前请确认本机已安装 iCode。作业上下文需在工具中显式读取，不会自动发送模型请求。</p>

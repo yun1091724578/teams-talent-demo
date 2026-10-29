@@ -1,7 +1,9 @@
+import {readProjectWorkspaces} from './project-workspaces.js';
+import type {ProjectWorkspaces,ProjectWorkspace} from '../src/project-workspace.js';
 import { readFile } from 'node:fs/promises';
 import { join, normalize, isAbsolute } from 'node:path';
 import { atomicJson } from './store.js';
-import { sharedDir, sharedSeedDir } from './config.js';
+import { sharedDir, sharedSeedDir, runtimeDir } from './config.js';
 import { DomainError, type DemoState } from '../src/domain.js';
 import type { Presentation } from '../src/api.js';
 import type { SourcePluginCatalog } from '../src/source-plugins.js';
@@ -28,20 +30,20 @@ function cardSkills(fixtures: Presentation): SharedSkill[] {
   return fixtures.skillCatalog.filter(skill => ids.has(skill.id)).map(skill => ({ id: skill.id, name: skill.name, version: skill.version,
     description: skill.description, path: repositoryPath('.agents/skills/' + skill.id + '/SKILL.md'), sha256: skill.contentSha256 }));
 }
-function cardProject(state: DemoState, fixtures: Presentation, catalog: SourcePluginCatalog): SharedProject {
+function cardProject(state: DemoState, fixtures: Presentation, catalog: SourcePluginCatalog, configured?:ProjectWorkspace): SharedProject {
   const project = state.workspace.project;
   const documents = project.assets.filter(asset => asset.kind === 'document').map(asset => {
     const source = asset.sourceAssetId ? catalog.get(asset.sourceAssetId) : undefined;
     return { id: asset.sourceAssetId ?? asset.id, title: asset.title, path: source?.references[0]?.path ?? asset.location, summary: source?.summary ?? '' };
   });
   return { id: 'carddemo', name: project.name, description: project.description, readonly: false,
-    repositories: [{ id: 'repository:carddemo:' + project.repository, name: project.repository, path: repositoryPath(project.repository), branch: 'main', description: 'Java 21 微服务：7 个服务和 Web UI' }],
+    repositories: [{ id: 'repository:carddemo:' + project.repository, name: project.repository, remote:configured?.remoteUrl??'https://github.com/JeffyLiu003/carddemo-java-1025.git',...(configured?{path:configured.directory,branch:configured.baseBranch}:{}), description: 'Java 21 微服务：7 个服务和 Web UI' }],
     documents, skills: cardSkills(fixtures) };
 }
 function sessions(state: DemoState): SharedSession[] {
   const members = new Map(state.workspace.team.members.map(member => [member.id, member.name]));
   const card = (value: Omit<SharedSession, 'projectId' | 'memberName' | 'cwd'>): SharedSession =>
-    ({ ...value, projectId: 'carddemo', memberName: members.get(value.memberId) ?? value.memberId, cwd: repositoryPath(state.workspace.project.repository) });
+    ({ ...value, projectId: 'carddemo', memberName: members.get(value.memberId) ?? value.memberId, cwd: '' });
   const shared = teamSessions.sessions.map(card);
   for (const record of state.workspace.taskAutomation ?? []) {
     if (record.collection?.reporting?.status !== 'reported') continue;
@@ -51,7 +53,7 @@ function sessions(state: DemoState): SharedSession[] {
         projectId: record.projectId, requirementId: record.taskId, title: task?.title ?? '白金卡消费返现需求',
         memberId: task?.assigneeId ?? state.assigneeId ?? 'member', memberName: members.get(task?.assigneeId ?? state.assigneeId ?? 'member') ?? '项目成员',
         updatedAt: localMinute(session.lastAt), turns: 0, agent: session.tool, model: '未提供',
-        cwd: task?.workDirectory ?? repositoryPath(state.workspace.project.repository), summary: session.nodeIds.join('、'),
+        cwd: record.preparation?.session?.directory ?? task?.workDirectory ?? '', summary: session.nodeIds.join('、'),
         transcript: !!record.collection.reporting.receipt?.documentHashes?.some(document => document.sessionId === session.sessionId) });
     }
   }
@@ -59,26 +61,26 @@ function sessions(state: DemoState): SharedSession[] {
   if (state.workspace.sessionReported) shared.unshift(card({ ...delivery, updatedAt: localMinute(state.workspace.reportAt ?? new Date().toISOString()) }));
   return shared;
 }
-export function teamsSnapshot(state: DemoState, fixtures: Presentation, catalog: SourcePluginCatalog): TeamsSnapshot {
+export function teamsSnapshot(state: DemoState, fixtures: Presentation, catalog: SourcePluginCatalog,workspaces?:ProjectWorkspaces): TeamsSnapshot {
   const imported = fixtures.teamsProject.project;
   return {
     schemaVersion: 1, exportedAt: new Date().toISOString(),
     team: { name: state.workspace.team.name, members: state.workspace.team.members },
     projects: [
-      cardProject(state, fixtures, catalog),
+      cardProject(state, fixtures, catalog,workspaces?.projects.find(item=>item.projectId==='carddemo')),
       { id: 'teams', name: imported.name, description: imported.description, readonly: true,
         repositories: imported.repos.map(repo => ({ id: 'repository:teams:' + repo.name, name: repo.name, remote: repo.name, branch: repo.branch, description: repo.note })),
         documents: imported.docs.map(doc => ({ id: 'design-library:teams:' + doc.path, title: doc.name, path: doc.path, summary: doc.description })),
         // The imported project's skills exist only in its source snapshot, not as files in this repository.
         skills: [] },
       ...(state.workspace.projects ?? []).map(project => ({ id: project.id, name: project.name, description: project.description, readonly: false,
-        repositories: [{ id: 'repository:' + project.id, name: project.repositoryIdentity, remote: project.remoteUrl }], documents: [], skills: [] })),
+        repositories: [{ id: 'repository:' + project.id, name: project.repositoryIdentity, remote: project.remoteUrl,...(workspaces?.projects.find(item=>item.projectId===project.id)?{path:workspaces.projects.find(item=>item.projectId===project.id)!.directory,branch:workspaces.projects.find(item=>item.projectId===project.id)!.baseBranch}:{}) }], documents: [], skills: [] })),
     ],
     sessions: sessions(state),
   };
 }
 export async function exportTeamsSnapshot(state: DemoState, fixtures: Presentation, catalog: SourcePluginCatalog) {
-  await atomicJson(join(sharedDir, sharedPaths.teamsSnapshot), teamsSnapshot(state, fixtures, catalog));
+  await atomicJson(join(sharedDir, sharedPaths.teamsSnapshot), teamsSnapshot(state, fixtures, catalog,await readProjectWorkspaces(runtimeDir)));
 }
 
 export async function readTalentsKnowledge(): Promise<TalentsKnowledge> {

@@ -22,7 +22,9 @@ React/antd 前端加 Node 服务。Teams 持有交付状态，并把成员、项
 
 见 [快速启动](docs/quick-start.md)、[页面地图](docs/page-map.md) 和 [设计说明](docs/demo-design.md)。
 
-实际 CardDemo 开发先按 [初始化与交付检查](docs/carddemo-development.md) 核对 JDK 21/Maven 和 iCode，建立 `develop` 基线与任务 worktree。指南包含 CLI/TUI 入口、真实测试工具及报告要求；平台 `main`、业务任务目录和原有运行会话各自保留，未提交旧代码不会自动带入新需求。
+实际 CardDemo 开发先按 [初始化与交付检查](docs/carddemo-development.md) 核对 JDK 21/Maven 和 iCode，配置独立业务仓库的交付基线与任务 worktree。指南包含 CLI/TUI 入口、真实测试工具及报告要求；平台 `main`、业务任务目录和原有运行会话各自保留，未提交旧代码不会自动带入新需求。
+
+按需求清回开始前并重新运行，使用 `npm run reset:task -- --project carddemo --task REQ-…`；默认仅预览，追加 `--apply` 执行并自动备份。先结束目标需求的 iCode 会话；需求内容、交付人和排期保留，业务代码及原生全局历史不清理。删除新建需求与备份撤回的完整用法见 [根目录按需求重置说明](../README.md#按需求重置)。
 
 Credit Card 项目（内部标识 `carddemo`）的 MKT-001 与新增交付需求共用同一四节点记录和 CLI 状态机制。节点下按输入、结果、执行过程展示，结果包含交付物与完成标准；上游产物引用和代码版本由页面及 CLI 共用，任务资料常驻；旧开发/检查演练按钮已停用。Teams CLI/Skill 保留项目、任务、节点和 run/session 关联；回传成果不代替 Owner 验收。详细契约见 [协作 Skill](skills/teams-demo-collaboration/SKILL.md)。
 

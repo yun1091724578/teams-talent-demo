@@ -1,3 +1,4 @@
+import {historicalSourceBytes} from './historical-source.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -33,7 +34,7 @@ test('published scenario contains exact full texts and verified repository refer
  assert.equal(published.files.length,5);assert.equal(published.projectId,'carddemo');assert.equal(state.tasks.some(task=>task.artifact===artifact.id),false);
  const manifest=JSON.parse(await readFile(join(contentDir,platinumCashbackPage.manifest),'utf8'));
  for(const file of manifest.knowledgeFiles){const content=await readFile(join(contentDir,file.path));assert.equal(createHash('sha256').update(content).digest('hex'),file.sha256);assert.equal(output.files.get(artifact.id+'/v1')!.find(item=>item.path===file.path)!.text,content.toString('utf8'));}
- for(const file of manifest.sourceFiles)assert.equal(createHash('sha256').update(await readFile(join(repositoryRoot,file.path))).digest('hex'),file.sha256);
+ for(const file of manifest.sourceFiles)assert.equal(createHash('sha256').update(historicalSourceBytes(file)).digest('hex'),file.sha256);
  const implementation=await readFile(join(contentDir,platinumCashbackPage.files.implementation),'utf8');assert.match(implementation,/没有白金等级/);assert.match(implementation,/不是 React/);
  const acceptance=await readFile(join(contentDir,platinumCashbackPage.files.acceptance),'utf8');assert.match(acceptance,/待执行的用例/);assert.match(acceptance,/不发送报名、交易、奖励评估或入账/);
 });

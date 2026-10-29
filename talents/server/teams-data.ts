@@ -55,7 +55,7 @@ function repoSources(project: SharedProject, meta: Record<string, SourceMeta>): 
   return project.repositories.filter(repo => repo.path).map(repo => {
     const m = meta[repo.id] ?? {};
     return { id: repo.id, type: 'repo', name: repo.name, path: repo.path!, desc: repo.description ?? '', fromTeams: true, projectId: project.id,
-      branch: repo.branch ?? 'main', origin: m.origin ?? repo.remote ?? '', commit: m.commit ?? null, prs: m.prs ?? 0 };
+      branch: repo.branch ?? 'main', origin: repo.remote ?? m.origin ?? '', commit: m.commit ?? null, prs: m.prs ?? 0 };
   });
 }
 /** A project's design documents become one document set named "<project>文档". */

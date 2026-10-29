@@ -30,9 +30,9 @@ test('maps the project documents into one document set named after the project',
   const set = docs[0];
   assert.equal(set.id, DOCSET_ID);
   assert.equal(set.name, '设计文档');
-  assert.equal(set.path, 'iCode Teams 已对接的 3 份设计文档');
+  assert.equal(set.path, 'teams');
   assert.equal(set.files, 3);
-  assert.deepEqual(set.tree, [{ dir: 'teams/docs', files: ['cashback-contract.md'] }, { dir: 'workspace/carddemo-java-1025/docs/design/adr', files: ['ADR-009-marketing-integration.md', 'ADR-007-authentication-scope.md'] }]);
+  assert.deepEqual(set.tree, [{ dir: 'teams/docs', files: ['cashback-contract.md'] }, { dir: 'teams/fixtures/project-documents/carddemo/docs/design/adr', files: ['ADR-009-marketing-integration.md', 'ADR-007-authentication-scope.md'] }]);
   assert.equal(set.titles!['teams/docs/cashback-contract.md'], '消费返现规则');
   assert.equal(set.fromTeams, true);
   const repo = model.sources.find(s => s.type === 'repo')!;

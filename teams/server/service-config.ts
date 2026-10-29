@@ -5,9 +5,6 @@ export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const localConfiguration = loadLocalConfiguration(root);
 export const materialRoot = resolve(process.env.DEMO_MATERIAL_ROOT ?? join(root, '..'));
 export const workspace = join(materialRoot, 'workspace');
-// Embedded source is historical material / legacy-task data only. New execution paths
-// resolve device-local project-workspaces.json and per-task worktree bindings.
-export const codeRoot = join(workspace, 'carddemo-java-1025');
 export const runtimeDir = resolve(process.env.DEMO_STATE_DIR ?? join(root, '.runtime'));
 export const sessionId = '6b82c08d-eb3b-4bdc-b373-54fed16a7fcd';
 export const port = Number(process.env.DEMO_PORT ?? 45970);

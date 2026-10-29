@@ -1,0 +1,2 @@
+export interface LegacyTaskWorktree {kind:'carddemo-worktree';projectId:string;taskId:string;recordedDirectory:string|null;directory:string;worktreeRoot:string;branch:string;baseBranch:string;baseCommit:string;platformRoot:string;commonDirectory:string;remote:'origin';remoteUrl:string}
+export function readLegacyTaskBinding(platformRoot:string,runtime:string,task:{projectId:string;id:string;workDirectory?:string}):Promise<LegacyTaskWorktree|null>;

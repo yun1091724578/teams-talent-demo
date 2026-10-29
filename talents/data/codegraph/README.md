@@ -15,9 +15,9 @@ Commit these files together. Existing snapshot directories are retained when a n
 From the repository root, using the installed CodeGraph CLI and Node.js 24:
 
 ```sh
-codegraph init workspace/carddemo-java-1025 --yes  # first scan only
-# Or: codegraph index workspace/carddemo-java-1025
-npm --prefix talents run codegraph:export
+codegraph init /absolute/path/carddemo-java-1025 --yes  # first scan only
+# Or: codegraph index /absolute/path/carddemo-java-1025
+npm --prefix talents run codegraph:export -- --project /absolute/path/carddemo-java-1025
 npm --prefix talents run seed:shared
 ```
 

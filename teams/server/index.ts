@@ -1,5 +1,6 @@
 import {readProjectWorkspaces, saveProjectWorkspace} from './project-workspaces.js';
 import { readTaskArtifactContent } from './task-artifact-content.js';
+import { TaskDeletionService } from './task-deletion.js';
 import { acquireTaskMaintenance } from './task-maintenance.js';
 import { projectModelContext } from './model-context.js';
 import { readTalentNodeInputs } from './talent-node-client.js';
@@ -21,7 +22,7 @@ import { terminalPreferences } from './terminal-preferences.js';
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { root, runtimeDir, port, origin, talentOrigin, materialRoot } from './config.js';
+import { root, runtimeDir, port, origin, talentOrigin, materialRoot, sharedDir } from './config.js';
 import { Store } from './store.js';
 import { DomainError, type Action, type Role } from '../src/domain.js';
 import { toolsStatus, writeContext, foundationSkill, launch } from './native.js';
@@ -38,6 +39,7 @@ const releaseTaskMaintenance=await acquireTaskMaintenance(runtimeDir,'service');
 const store = new Store(); await store.init();
 const token = randomBytes(24).toString('hex');
 const fixtures = await readFixtures();
+const deletions = new TaskDeletionService(store,{root,runtime:runtimeDir,shared:sharedDir});
 const work = new ProjectWorkService(() => store.state, fixtures);
 const taskSessionStream = createTaskSessionStream(runtimeDir);
 const sourceCatalog = createSourcePluginCatalog(fixtures);
@@ -78,6 +80,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && path === '/api/health') { json(200, { app: 'teams-talent-carddemo', service: 'teams', workspaceRoot: root, stateRoot: runtimeDir, version: '0.2.0', pid: process.pid, origin, talentOrigin }); return; }
     if (request.method === 'GET' && path === '/api/bootstrap') { await syncKnowledge(); json(200, { token, state: store.state, data: fixtures }); return; }
     if (request.method === 'GET' && path === '/api/state') { await syncKnowledge(); json(200, store.state); return; }
+    if(request.method==='GET'&&path==='/api/delivery-requirements/delete-plan'){const role=url.searchParams.get('role');if(role!=='owner'&&role!=='member')throw new DomainError('请选择角色',400);json(200,await deletions.preview(role,{projectId:url.searchParams.get('projectId')??'',taskId:url.searchParams.get('taskId')??''}));return;}
     if (request.method === 'GET' && path === '/api/task-node-inputs') {
       const projectId=url.searchParams.get('projectId')??'',taskId=url.searchParams.get('taskId')??'',role=url.searchParams.get('role');
       if(!['owner','member'].includes(role??''))throw new DomainError('请选择角色',400);
@@ -137,8 +140,9 @@ const server = createServer(async (request, response) => {
       if (!body || !['owner', 'member'].includes(body.role)) throw new DomainError('请选择角色', 400);
       if(path==='/api/project-workspaces'){
         if(typeof body.projectId!=='string'||body.projectId!=='teams'&&!projectMembers(store.state,body.projectId).some(member=>member.id===body.role&&member.status==='active'))throw new DomainError('无权配置此项目工作区',403);
-        json(200,await store.exclusive(()=>saveProjectWorkspace(runtimeDir,join(root,'..'),{projectId:body.projectId,directory:body.directory,remoteUrl:body.remoteUrl,baseBranch:body.baseBranch})));return;
+        const saved=await store.exclusive(()=>saveProjectWorkspace(runtimeDir,join(root,'..'),{projectId:body.projectId,directory:body.directory,remoteUrl:body.remoteUrl,baseBranch:body.baseBranch}));await exportSnapshot();json(200,saved);return;
       }
+      if(path==='/api/delivery-requirements/delete'){json(200,await deletions.remove(body.role,{projectId:body.projectId,taskId:body.taskId,planToken:body.planToken,operationId:body.operationId,revision:body.revision}));return;}
       if (path === '/api/action' && body.action === 'knowledge') throw new DomainError('项目知识由 Talents 发布后自动同步', 400);
       if (path === '/api/action' && ['candidate', 'evaluate', 'release', 'adopt'].includes(body.action)) throw new DomainError('能力演进已迁移到 Talents', 400);
       if (path === '/api/action') {
@@ -192,7 +196,7 @@ const server = createServer(async (request, response) => {
       if (path === '/api/native/skill-apply') { if(process.env.DEMO_NATIVE_DISABLED==='1')throw new DomainError('此验证实例未开放原生用户目录写入',403); json(200,await skillApplications.apply(body.role,{projectId:body.projectId,resourceId:body.resourceId,version:body.version,sha256:body.sha256,requestId:body.requestId,planToken:body.planToken}));return; }
       if (path === '/api/native/terminal') { json(200, await terminalPreferences.select(body.terminal)); return; }
       if (path === '/api/native/work-bind') { json(200, await work.bind(body.role, body.target, body.directory)); return; }
-      if (path === '/api/native/work-start') { json(200, await work.start(body.role, { requestId: body.requestId, target: body.target, action: body.action, planToken: body.planToken, ...(body.mode!==undefined?{mode:body.mode}:{}), ...(body.instruction!==undefined?{instruction:body.instruction}:{}) })); return; }
+      if (path === '/api/native/work-start') { json(200, await store.exclusive(async()=>work.start(body.role, { requestId: body.requestId, target: body.target, action: body.action, planToken: body.planToken, ...(body.mode!==undefined?{mode:body.mode}:{}), ...(body.instruction!==undefined?{instruction:body.instruction}:{}) }))); return; }
       if (path === '/api/native/context') { json(200, await writeContext(store.state)); return; }
       if(path==='/api/native/foundation'){json(200,await foundationSkill());return;}
       if (path === '/api/native/launch') {

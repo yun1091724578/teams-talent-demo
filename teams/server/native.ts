@@ -8,7 +8,7 @@ import { access, readFile, mkdir, writeFile, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { binary, workspace, runtimeDir, codeRoot, root, origin, traceDataDir, icodeBinarySource, icodeBinaryNotes } from './config.js';
+import { binary, workspace, runtimeDir, root, origin, traceDataDir, icodeBinarySource, icodeBinaryNotes } from './config.js';
 import { atomicJson, atomicText } from './store.js';
 import { nativeSkillEnvironment } from './native-skill-reader.js';
 import { nativeTraceRuntime } from './native-trace-runtime.js';
@@ -29,10 +29,13 @@ async function openCodePath() {
 export async function nativeWorkspace() {
   const configured=await configuredProjectWorkspace(runtimeDir);
   if(configured) {await verifyProjectWorkspace(configured);return configured.directory;}
-  return workspace;
+  throw new Error('尚未配置项目工作区，请到项目概览的工作区设置中指定独立仓库路径');
 }
 export async function toolsStatus() {
-  const launchWorkspace=await nativeWorkspace();
+  const configured=await configuredProjectWorkspace(runtimeDir);
+  let launchWorkspace:string|null=null,workspaceError:string|undefined;
+  if(configured)try{await verifyProjectWorkspace(configured);launchWorkspace=configured.directory;}catch(error){workspaceError=(error as Error).message;}
+  else workspaceError='尚未配置项目工作区，请到项目概览设置独立仓库路径';
   let installedICode = false, installError: string | undefined;
   try { installedICode = await installed(binary); }
   catch (error) { installError = 'iCode 探测失败：' + (error as Error).message; }
@@ -53,6 +56,7 @@ export async function toolsStatus() {
   const notes = [...icodeBinaryNotes, ...(installError ? [installError] : []), ...(versionError ? [versionError] : [])];
   return {
     ...await terminalPreferences.context(),
+    ...(workspaceError?{workspaceError}:{}),
     icode: { installed: installedICode, path: binary, version, workspace:launchWorkspace, sessionId: '', sessionAvailable: false, active: null, source: icodeBinarySource, notes },
     opencode: { installed: !!opencode && !unsupportedReason, path: opencode, version: openVersion, unsupportedReason, notes: openError ? [openError] : [] },
     verification: null,
@@ -67,8 +71,9 @@ export async function foundationSkill() {
 export async function writeContext(state: DemoState) {
   if (!state.context) throw new Error('请先冻结项目上下文');
   const projectWorkspace=await configuredProjectWorkspace(runtimeDir,'carddemo');
-  if(projectWorkspace)await verifyProjectWorkspace(projectWorkspace);
-  const projectDirectory=projectWorkspace?.directory??codeRoot;
+  if(!projectWorkspace)throw new Error('请先在 Credit Card 项目概览配置独立仓库路径');
+  await verifyProjectWorkspace(projectWorkspace);
+  const projectDirectory=projectWorkspace.directory;
   const chosen=state.context.selectedSkills;
   const foundation=await foundationSkill();
   const path = join(runtimeDir, 'contexts', state.context.id + '-' + createHash('sha256').update(state.context.createdAt).digest('hex').slice(0, 12) + '-v4-'+createHash('sha256').update(projectDirectory).digest('hex').slice(0,12)+'.md');

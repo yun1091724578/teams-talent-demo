@@ -10,10 +10,10 @@ import { initialState } from '../src/domain.js';
 import { updateWorkspace } from '../src/workspace.js';
 import { readFixtures } from '../server/http-shared.js';
 import { ProjectWorkService, resolveProjectWork, type WorkTransport } from '../server/project-work.js';
-import { sessionId, workspace } from '../server/config.js';
+const sessionId='6b82c08d-eb3b-4bdc-b373-54fed16a7fcd',workspace=tmpdir();
 import { createDeliveryRequirement } from '../src/delivery-requirements.js';
 const fixtures = await readFixtures();
-function workingMain(role:'owner'|'member'='member'){const state=initialState();state.assigned=true;state.assigneeId=role;state.stage='assigned';migrateMainDelivery(state);return state;}
+function workingMain(role:'owner'|'member'='member',directory:string){execFileSync('git',['init','-q',directory]);const state=initialState();state.assigned=true;state.assigneeId=role;state.stage='assigned';migrateMainDelivery(state);state.workspace.deliveryRequirements!.find(task=>task.id==='DEMO-MKT-001')!.workDirectory=directory;return state;}
 function transport() {
   const calls: any[] = []; let active = false, fail = false, terminal = 'ghostty';
   const value: WorkTransport = { defaults: async () => ({agent:'role',agentLabel:'Code',model:'model',modelLabel:'Model',terminal:{id:terminal,name:terminal==='ghostty'?'Ghostty':'Terminal',error:undefined}}), history: async () => ({available:true,directory:workspace,title:'history',configuration:{agent:'original-role',agentLabel:'Original',model:'original-model',modelLabel:'Original model'},active:active?{pid:123,application:'Ghostty',tty:'ttys123',terminal:{id:'surface',title:'history',directory:workspace}}:null}), start: async input => { calls.push(input); if(fail)throw new Error('transport uncertain'); return { terminal: 'PowerShell' }; }, focus:async input=>{calls.push(input);return {status:'terminal-focused',note:'focused known terminal'};} };
@@ -35,7 +35,7 @@ test('work resolves precise Card/Teams/new-project scope and does not substitute
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('one confirmation pins scope/config, repeated request does not launch again, changed basis is rejected', async () => {
-  const dir=await mkdtemp(join(tmpdir(),'work-start-')), t=transport();let state=workingMain();
+  const dir=await mkdtemp(join(tmpdir(),'work-start-')), t=transport();let state=workingMain('member',dir);
   try {
     const service=new ProjectWorkService(()=>state,fixtures,dir,t.value,undefined,dir), before=JSON.stringify(state), plan=await service.plan('member',{projectId:'carddemo',tab:'delivery',nodeId:'develop'});
     const body={requestId:randomUUID(),target:plan.target,action:'new' as const,planToken:plan.planToken};
@@ -47,7 +47,7 @@ test('one confirmation pins scope/config, repeated request does not launch again
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('old restore actions are unavailable and launch uncertainty is retained',async()=>{
-  const dir=await mkdtemp(join(tmpdir(),'work-current-')), t=transport(),state=workingMain('owner');t.setActive();
+  const dir=await mkdtemp(join(tmpdir(),'work-current-')), t=transport(),state=workingMain('owner',dir);t.setActive();
   try{
     const service=new ProjectWorkService(()=>state,fixtures,dir,t.value,undefined,dir),plan=await service.plan('owner',{projectId:'carddemo',tab:'delivery',nodeId:'prepare'});
     assert.deepEqual(plan.actions.map(a=>a.id),['new']);assert.equal(plan.history,undefined);
@@ -76,7 +76,7 @@ test('old resume request is rejected before launching any native work',async()=>
 });
 
 test('changing saved terminal invalidates the confirmation while active focus remains on its original terminal', async () => {
-  const dir=await mkdtemp(join(tmpdir(),'work-terminal-')), t=transport(), state=workingMain('owner');
+  const dir=await mkdtemp(join(tmpdir(),'work-terminal-')), t=transport(), state=workingMain('owner',dir);
   try {
     const service=new ProjectWorkService(()=>state,fixtures,dir,t.value,undefined,dir), plan=await service.plan('owner',{projectId:'carddemo',tab:'delivery'});
     assert.equal(plan.instance.terminal?.name,'Ghostty');t.setTerminal('terminal');

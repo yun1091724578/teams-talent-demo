@@ -37,6 +37,7 @@ export function createDeliveryRequirement(state:DemoState,role:Role,input:Record
  if(!Array.isArray(skillIds)||skillIds.length>20||skillIds.some(id=>typeof id!=='string'||!/^[a-z0-9-]+$/.test(id)))throw new DomainError('所选 Skill 格式无效', 400);
  const due=optionalDue(input.due),workDirectory=input.workDirectory===undefined?undefined:creationText(input.workDirectory,'工作目录',2000);
  const fields={id,projectId,title:creationText(input.title,'需求标题',160),description:creationText(input.description,'需求说明',4000,true),assigneeId:optionalAssignee(state,projectId,input.assigneeId),skillIds:[...new Set(skillIds as string[])].sort(),...(due?{due}:{}),...(workDirectory?{workDirectory}:{})};
+ if(state.workspace.taskDeletions?.some(item=>item.projectId===projectId&&item.taskId===id))throw new DomainError('此需求标识已删除，不能重新创建；请使用新的需求标识',409);
  const creationRequest=JSON.stringify(fields),existing=deliveryRequirement(state,projectId,id);
  if(existing){if(existing.creationRequest!==creationRequest)throw new DomainError('同一需求标识不能用于不同创建内容',409);return existing;}
  const nodes=Object.fromEntries(['prepare','develop','verify','accept'].map(id=>[id,{status:'pending',updatedAt:null,summary:''}])) as DeliveryRequirement['nodes'];

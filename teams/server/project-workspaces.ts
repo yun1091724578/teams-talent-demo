@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, realpath, stat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { readFile, realpath, stat, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { DomainError } from '../src/domain.js';
@@ -74,7 +74,9 @@ export async function saveProjectWorkspace(runtime: string, platformRoot: string
     if (inside(platform, directory) || inside(directory, platform)) throw new DomainError('业务仓库必须位于 Teams 工程之外，不能使用其中的 workspace 子目录', 400);
     workspaceRepositoryIdentity(input.remoteUrl);
     const commonDirectory = await realpath(resolve(directory, await git(directory, ['rev-parse', '--git-common-dir'])));
-    if (commonDirectory === await realpath(resolve(platform, await git(platform, ['rev-parse', '--git-common-dir'])))) throw new DomainError('此工作区仍属于 Teams 仓库，请使用业务项目的独立仓库', 400);
+    // The Teams client may be distributed as a ZIP with no Git metadata. Only the business checkout requires Git.
+    let platformHasGit=true;try{await lstat(join(platform,'.git'));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')platformHasGit=false;else throw error;}
+    if (platformHasGit && commonDirectory === await realpath(resolve(platform, await git(platform, ['rev-parse', '--git-common-dir'])))) throw new DomainError('此工作区仍属于 Teams 仓库，请使用业务项目的独立仓库', 400);
     const item = await verifyProjectWorkspace({ ...input, directory, commonDirectory });
     const config = await readProjectWorkspaces(runtime);
     config.projects = [...config.projects.filter(old => old.projectId !== item.projectId), item]; config.defaultProjectId = item.projectId;

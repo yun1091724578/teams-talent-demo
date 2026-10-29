@@ -10,11 +10,11 @@ git clone https://github.com/JeffyLiu003/carddemo-java-1025.git /absolute/path/c
 
 进入 Teams → 项目 → Credit Card → 项目概览 → 工作区设置，填写本机仓库根目录、上述 Git 仓库地址、交付基线分支（该仓库已有 `main`，也可使用自行维护的 `develop`），点击“保存工作区”。Windows 同样填写本机绝对路径，例如 `D:\projects\carddemo-java-1025`。Git、iCode、JDK 21、Maven 必须在运行 Teams 的同一设备上可用。保存会核验目录为 Git 根目录、origin 与填写的仓库相符、基线分支在本地存在；不会自动 checkout、pull、push 或复制未提交代码。
 
-Agent 管理中的普通 iCode/OpenCode 启动使用当前默认项目目录。已分配的新需求在知识获取完成、会话初始化前，自动从**业务仓库本地基线分支当前提交**创建独立 worktree：`<业务仓库名>-tasks/<任务标识>/`，分支 `codex/<项目>-<任务标识>`。TUI、CLI 与产物预览使用同一任务绑定。PR 目标为保存的交付基线分支；该分支需已发布到目标远端才能创建 PR。没有远端写权限时如实回报阻塞，不向 Teams 仓库提交业务代码。
+Agent 管理中的普通 iCode/OpenCode 启动使用当前默认项目目录。已分配的新需求在知识获取完成、会话初始化前，自动从**业务仓库本地基线分支当前提交**创建独立 worktree：`<业务仓库名>-tasks/<任务标识>/`，分支 `codex/<项目>-<任务标识>`。TUI、CLI、产物预览与清理都使用同一任务绑定。PR 目标为保存的交付基线分支；该分支需已发布到目标远端才能创建 PR。没有远端写权限时如实回报阻塞，不向 Teams 仓库提交业务代码。
 
 设备配置在实际 Teams 状态目录的 `project-workspaces.json`，新任务固定绑定在 `project-worktree-bindings.json`。状态目录以本机 `teams/.local/config.json` 中 `DEMO_STATE_DIR` 或服务 `/api/health` 的 `stateRoot` 为准。绑定记录仓库、分支、基线 SHA 和绝对目录；修改默认配置只影响后续任务，已有会话与旧任务继续使用原绑定，不能静默迁移。每台机器需要分别 clone 并保存本机路径，不将本机配置提交 Git。
 
-仓库中 `workspace/carddemo-java-1025`、fixtures 和已发布 Talent 文件中的路径是历史素材来源，不再作为已配置项目的新任务执行目录。保留原来源及 SHA256，不能把外部仓库新版本伪装为旧素材版本。
+内嵌业务工程已移除。fixtures 与已发布 Talent 文件中的旧路径仅记录历史素材来源，不用于解析当前执行目录。保留原来源及 SHA256，不能把外部仓库新版本伪装为旧素材版本。
 
 
 ## 启动前核对
@@ -57,43 +57,11 @@ Teams 新启动的 iCode CLI／TUI 子进程会合并已有 `NO_PROXY` 和 `no_p
 
 缺少工具时，先安装 JDK 21、Apache Maven、Docker Desktop（启用 Linux 容器）、Git/GitHub CLI 和 Trivy，再核对实际版本。macOS 可用包管理器或官方安装包，Windows 可用官方安装包或已批准的包管理器；不要把另一台机器的绝对路径复制为配置。Maven 首次需要下载插件与依赖，Trivy 首次需要获取漏洞库；下载失败须保留错误并解决，不能改用空报告。仅在项目 POM 明确需要时增加其他服务，本基线无需 Redis。
 
-## 旧版内嵌基线与需求目录（已有任务）
+## 项目工作区与需求目录
 
-本节仅适用于已有内嵌工作区的维护；新需求请使用上方独立业务仓库配置，不再执行以下初始化。以下命令均在平台仓库根目录执行。先由维护者明确获取并选定 `origin/main` 或 `origin/develop` 的提交，将输出的完整 40 位 SHA 填入命令。工具不自动 fetch、安装依赖或推送。
+业务仓库必须位于 Teams 仓库之外。由维护者在该仓库获取所需远端提交、更新本地交付基线，再在项目概览保存目录、origin 和基线分支；不自动 fetch、切分支、push 或搬运未提交代码。初始化会话前，Teams 仅从已配置业务仓库的基线提交创建任务 worktree。
 
-```sh
-git remote get-url origin
-git fetch origin
-git rev-parse origin/main
-git rev-parse origin/develop
-npm run carddemo:workspace -- init --base-commit <40位SHA>
-npm run carddemo:workspace -- init --base-commit <同一40位SHA> --apply
-```
-
-首次尚无 `origin/develop` 时，该引用查询会报不存在；由维护者明确选择已获取的 `origin/main`。已有 `origin/develop` 时，初始 SHA 必须与它一致。基线用完整提交 SHA 记录，不以需求包中的环境名称猜测代码版本。
-
-默认只输出预览。核对来源仓库、基线、分支和目录后才加 `--apply`。可用 `--expected-origin` 固定预期远端，`--worktree` 指定绝对同级目录；已有分支和目录必须通过工具核验。`fetch` 只更新远端引用，不在平台目录执行 `pull`、切换分支、stash、reset 或覆盖未提交文件。
-
-需求 PR 需要远端 `develop` 已存在。首次初始化后，由维护者核对 `git rev-parse develop` 与选定基线 SHA，再显式发布该分支：
-
-```sh
-git rev-parse develop
-git push -u origin develop
-git ls-remote --heads origin develop
-```
-
-这一步只发布已核对的 Git 提交，未提交文件不会被带入。工具本身不 push；已有远端分支时先核对其历史，不强制覆盖。GitHub 登录成功还需具备目标仓库推送和创建 PR 的权限。任务中明确授权提交／推送／PR 后，iCode 才可使用 `git`／`gh`，PR 的 base 固定为 `develop`；本机预览与启动检查不创建 PR。
-
-初始化启用后，新创建的任务会在后台准备真实会话前建立独立任务 worktree；只读查询不会创建目录。启用前已存在且尚未执行的任务，或需要先核对任务目录时，使用显式入口：
-
-```sh
-npm run carddemo:workspace -- task init --project carddemo --task <完整任务ID>
-npm run carddemo:workspace -- task init --project carddemo --task <完整任务ID> --apply
-```
-
-页面的 `MKT-001` 对应内部 ID `DEMO-MKT-001`；新需求使用完整 `REQ-…`。目录以工具输出为准：任务 worktree 使用 `codex/carddemo-…` 分支，实际业务代码位于其 `workspace/carddemo-java-1025`。开发只修改该业务目录，需求 PR 的目标是 `develop`；平台修改继续走 `main`。初始化不会创建 PR、提交或推送。
-
-本机配置保存在忽略文件 `teams/.local/carddemo-workspace.json`，任务目录绑定保存在实际 Teams 状态目录的 `project-task-directory-bindings.json`。`init` 输出的 `directory` 是 develop 业务目录，`task init` 的 `binding.directory` 是任务业务目录。每条新绑定取**创建绑定时已配置 develop worktree 的 HEAD**，并固定 `baseCommit`；以后 develop 前进不改变已有任务基线。绑定供新作业解析使用；已运行或已准备会话仍保留原目录，工具拒绝迁移这类任务。原目录未提交代码原样保留，新基线和任务 worktree 只取已选定的 Git 提交，不带入这些改动、密钥或本机配置。
+旧的 `carddemo-workspace.json` 和旧任务目录记录只作为历史资料保留，不再提供在 Teams 仓库初始化业务分支的命令。已有任务保持原目录、分支和会话，缺失目录时明确报错，不替换成当前项目工作区。重新运行时使用新任务和新绑定。
 
 ## 页面 TUI 与显式 CLI 作业
 
@@ -183,9 +151,9 @@ PMD 的 `pmd` 是生成报告的 goal，成功退出不表示零问题；检查�
 
 每项报告至少保留：任务与节点、代码 commit／未提交 diff 摘要、工具和版本、完整命令、执行时间、退出码、通过／失败／跳过数量、日志和问题引用。原始 Maven 报告保留在各模块 `target/`。PRD、设计、业务代码和测试应提交到任务分支；PR head 固定后生成的运行报告可放在独立忽略证据目录，正文写明被测 SHA，避免为提交含 SHA 的报告本身不断改变版本。Teams 成果回传引用真实文件和同一代码版本。`preset` 只用于明确允许的验证流程检查，不能充当真实开发单测、真实扫描或真实模型执行证据。
 
-## PR 验收与 develop 更新
+## PR 验收与交付基线更新
 
-开发者已明确授权提交时，iCode 可在本任务绑定的 `codex/carddemo-…` 分支提交、推送并创建 base 为 `develop` 的 PR；不能直接推平台 `main` 或业务 `develop`，不能替 Owner 合并。只暂存本需求的明确文件／变更块，不用 `git add .` 带入已有脏文件。PRD、设计与代码提交、单测报告、验证报告必须对应当前 PR head；后续修复改变 SHA 后重新验证，不借旧报告通过。
+开发者已明确授权提交时，iCode 可在本任务绑定的 `codex/carddemo-…` 分支提交、推送并创建 base 为项目所配置交付基线分支的 PR；不能直接推平台 `main` 或业务交付基线，不能替 Owner 合并。只暂存本需求的明确文件／变更块，不用 `git add .` 带入已有脏文件。PRD、设计与代码提交、单测报告、验证报告必须对应当前 PR head；后续修复改变 SHA 后重新验证，不借旧报告通过。
 
 Owner 先检查需求范围、PR diff、真实原生工具／CLI 回执、必要测试和静态／安全报告，再在 Teams 明确验收或退回。通过后核对任务会话归集共享回执。维护者在获得合并授权后执行：
 
@@ -196,38 +164,39 @@ gh pr checks <PR号或URL>
 gh pr merge <PR号或URL> --merge
 ```
 
-无自动检查不等于检查通过。合并后，在**已登记的独立 develop worktree** 中确认工作区干净，再快进；不要在平台 main 或任务工作树里执行这组更新：
+无自动检查不等于检查通过。合并后，在**所配置交付基线分支的独立 checkout/worktree** 中确认工作区干净，再快进；不要在平台 main 或任务工作树里执行这组更新：
 
 ```sh
-git -C "<develop worktree根>" status --short
-git -C "<develop worktree根>" fetch origin develop
-git -C "<develop worktree根>" merge --ff-only origin/develop
-git -C "<develop worktree根>" rev-parse HEAD
+git -C "<业务基线checkout根>" status --short
+git -C "<业务基线checkout根>" fetch origin <交付基线分支>
+git -C "<业务基线checkout根>" merge --ff-only origin/<交付基线分支>
+git -C "<业务基线checkout根>" rev-parse HEAD
 ```
 
-若不干净或不能快进，先定位冲突，不 reset、不强推、不复制旧 checkout 的脏业务代码。下一需求新绑定将以更新后的 develop HEAD 为基线，已有需求绑定和会话不迁移。
+若不干净或不能快进，先定位冲突，不 reset、不强推、不复制旧 checkout 的脏业务代码。下一需求新绑定将以更新后的交付基线 HEAD 为基线，已有需求绑定和会话不迁移。
 
-## 回退代码与清理环境
+## 回退代码、重跑任务与清理环境
 
-代码回退与环境清理分别处理，先保存验收证据并确认相关原生任务已结束：
+这三件事分别处理，先保存验收证据并确认相关原生任务已结束：
 
 | 目的 | 操作 | 不会改变 |
 |---|---|---|
-| 撤回已合并试验业务代码 | 从最新 `origin/develop` 新建回退 worktree／分支，用 `git revert` 后提 PR 到 develop | 平台 main、原 checkout 脏改动、历史会话和 Teams 验收记录 |
+| 撤回已合并试验业务代码 | 从最新远端交付基线新建回退 worktree／分支，用 `git revert` 后向同一基线提 PR | 平台 main、原 checkout 脏改动、历史会话和 Teams 验收记录 |
+| 将某需求流程清回开始前 | 精确 `reset:task --project carddemo --task …`，先预览再 `--apply` | 已提交业务代码、Git PR／合并历史、其他需求和全局 iCode 历史 |
 | 释放本次测试资源 | 使用本需求准确 Compose 文件 `down -v` | 其他 Compose 项目和业务 Git 内容 |
 
-用户已批准的试验合并需要还原时，维护者可从已核对的最新 develop 创建专用回退分支。对 merge commit 使用 `-m 1`，按合并的逆序逐一 revert；若原 PR 是 squash／普通提交则不用 `-m`，先核对提交父节点。示例只表示一个已确认 merge commit：
+用户已批准的试验合并需要还原时，维护者可从已核对的最新交付基线创建专用回退分支。对 merge commit 使用 `-m 1`，按合并的逆序逐一 revert；若原 PR 是 squash／普通提交则不用 `-m`，先核对提交父节点。示例只表示一个已确认 merge commit：
 
 ```sh
-git fetch origin develop
-git worktree add -b codex/carddemo-revert-batch "<新的回退worktree绝对路径>" origin/develop
+git fetch origin <交付基线分支>
+git worktree add -b codex/carddemo-revert-batch "<新的回退worktree绝对路径>" origin/<交付基线分支>
 git -C "<回退worktree根>" show --no-patch --format="%H %P" <待撤回mergeSHA>
 git -C "<回退worktree根>" revert -m 1 <待撤回mergeSHA>
 ```
 
-在回退工作树运行受影响测试，核对只撤回本批业务变更，再推该分支、创建 base=develop 的回退 PR，经审查合入并快进 develop。不要用 `reset --hard`、强推或手工覆盖代码抹掉历史；后续任务已依赖这些改动时，先评估逆序回退影响。
+在回退工作树运行受影响测试，核对只撤回本批业务变更，再推该分支、创建以交付基线为 base 的回退 PR，经审查合入并快进该基线。不要用 `reset --hard`、强推或手工覆盖代码抹掉历史；后续任务已依赖这些改动时，先评估逆序回退影响。
 
-独立运行环境仅在无人使用后清理：
+任务数据重置的预览、备份恢复和活动会话保护见[根目录按需求重置](../../README.md#按需求重置)。它会归档明确属于该任务的生成资料及 Teams 原生副本；需要长期留存的验收报告先保存。撤回 reset 备份不等于撤回 Git revert。独立运行环境仅在无人使用后清理：
 
 ```sh
 docker compose -f "<该任务的准确compose.json>" down -v

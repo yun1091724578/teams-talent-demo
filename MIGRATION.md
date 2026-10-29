@@ -104,7 +104,7 @@ node --import tsx scripts/migrate-native-session-location.ts \
 
 ## 四、数据变化
 
-- 「信用卡营销交付」的 ADR-009、ADR-007 两条设计文档记录，改为指向 `workspace/carddemo-java-1025/docs/design/adr/` 下的真实 ADR。`teams/docs/cashback-integration.md` 和 `security-scope.md` 保留，但不再被引用。
+- ADR-009、ADR-007 当前使用 `teams/fixtures/project-documents/carddemo/docs/design/adr/` 中固定的原始文档样本；旧版内嵌业务工程已经移除，实际开发目录由项目工作区配置。`teams/docs/cashback-integration.md` 和 `security-scope.md` 保留，但不再被引用。
 - 新增 `teams/fixtures/team-sessions.json`：成员已共享的会话，会导出给 Talents 做轨迹诊断。交付会话 `WORK-PLATINUM-001` 在成员上报后才出现。
 
 ## 五、验证

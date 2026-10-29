@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { runtimeDir,root } from './config.js';
 import {resolve} from 'node:path';
 import {taskWorktreeBinding} from './task-work-directory.js';
-import {readCarddemoWorkspace} from '../../scripts/lib/carddemo-workspace.mjs';
+import {configuredProjectWorkspace} from './project-workspaces.js';
 import type {DeliveryRequirement} from '../src/delivery-requirements.js';
 import { deliveryRequirement,requireDeliveryMember } from '../src/delivery-requirements.js';
 import type { TalentTaskSessionReceipt } from '../src/talent-contract.js';
@@ -20,7 +20,7 @@ export async function taskReportSessionDocuments(runtime:string,scope:TaskScope,
  if(!task)return undefined;
  const binding=await taskWorktreeBinding(runtime,task,workspaceRepo);
  if(task.workDirectory||task.id==='DEMO-MKT-001'||binding||preparedDirectory)return nativeTaskSessionDocuments(runtime,scope,sessions,capture);
- if(task.projectId==='carddemo'&&await readCarddemoWorkspace(workspaceRepo))throw new Error('本任务缺少已验证的工作区或原生准备目录，未上报会话正文');
+ if(await configuredProjectWorkspace(runtime,task.projectId))throw new Error('本任务缺少已验证的工作区或原生准备目录，未上报会话正文');
  return undefined;
 }
 

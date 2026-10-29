@@ -21,7 +21,8 @@ export interface NativeStatus {
   terminals?: Array<{ id: string; name: string }>;
   selectedTerminal?: string;
   terminalError?: string;
-  icode: { installed: boolean; path: string; version: string | null; workspace: string; sessionId: string; sessionAvailable: boolean; active: { pid: number; application: string | null; tty: string } | null; source?: 'override' | 'official' | 'bundled' | 'missing'; notes?: string[] };
+  workspaceError?: string;
+  icode: { installed: boolean; path: string; version: string | null; workspace: string | null; sessionId: string; sessionAvailable: boolean; active: { pid: number; application: string | null; tty: string } | null; source?: 'override' | 'official' | 'bundled' | 'missing'; notes?: string[] };
   opencode: { installed: boolean; path: string | null; version: string | null; unsupportedReason?: string; notes?: string[] };
   verification: { status: string; at: string; messageCount: number; note: string } | null;
 }
@@ -77,6 +78,9 @@ export const getResourceContent = (role: Role, scope: {resourceId:string;version
 export const triggerTaskAutomation = (role: Role, scope: import('./task-automation.js').TaskScope, step: 'knowledge' | 'collection' | 'preparation' | 'node-knowledge', retry = false, nodeId?: 'prepare' | 'develop' | 'verify') => tracedJson<DemoState>('teams', '/api/task-automation', { method: 'POST', body: JSON.stringify({ role, ...scope, step, retry, ...(nodeId ? { nodeId } : {}) }) });
 
 export const deliveryRequirementAction=(state:DemoState,role:Role,input:Record<string,unknown>)=>tracedJson<DemoState>('teams','/api/delivery-requirements',{method:'POST',body:JSON.stringify({revision:state.revision,role,...input})});
+
+export const getTaskDeletionPlan = (role: Role, scope: { projectId: string; taskId: string }) => tracedJson<import('./task-deletion.js').TaskDeletionPlan>('teams', '/api/delivery-requirements/delete-plan?' + new URLSearchParams({ role, ...scope }));
+export const deleteTaskRequirement = (role: Role, input: { projectId: string; taskId: string; planToken: string; operationId: string; revision: number }) => tracedJson<import('./task-deletion.js').TaskDeletionResult>('teams', '/api/delivery-requirements/delete', { method: 'POST', body: JSON.stringify({ role, ...input }) });
 
 export const getTaskSessionStream = (role: Role, query: import('./task-session-stream.js').TaskSessionStreamQuery) => tracedJson<import('./task-session-stream.js').TaskSessionStreamResponse>('teams', '/api/task-session-stream?' + new URLSearchParams({ role, ...query }));
 

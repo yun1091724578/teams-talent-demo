@@ -133,9 +133,40 @@ Teams 单独启动时可读取已提交的 `shared/seed/talents/`；Talents 启�
 
 ## CardDemo 开发初始化
 
-实际业务开发前，核对 **JDK 21、Maven 3.9+、Node.js 24、Git 和 Teams 实际使用的 iCode**。平台继续在 `main` 运行；使用 `npm run carddemo:workspace -- …` 为 CardDemo 建立 `develop` 和需求 worktree，先预览再执行，需求 PR 提交到 `develop`。旧目录未提交代码和已有会话保留，新工作区只取明确的 Git 基线。
+实际业务开发前，核对 **JDK 21、Maven 3.9+、Node.js 24、Git 和 Teams 实际使用的 iCode**。平台继续在 `main` 运行；业务代码从独立仓库检出，在「项目概览 → 工作区设置」配置本机目录、origin 和交付基线分支。新需求自动使用业务仓库的独立任务 worktree，PR 目标以绑定的基线为准；未配置时不能启动，不提供内嵌业务工程默认目录。
 
 初始化命令、macOS/Windows 工具核对、CLI/TUI 使用及真实测试要求见 [CardDemo 初始化与交付检查](teams/docs/carddemo-development.md)。Java 单元与服务内接口测试使用 H2；Docker/PostgreSQL 用于独立跨服务验证。当前未接通的静态分析、安全扫描须明确登记，预置结果不能替代真实单测。
+
+## 按需求重置
+
+在仓库根目录使用同一条跨平台命令。先结束目标需求正在运行的 iCode 会话，将示例中的 `REQ-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` 替换为任务列表中的完整 ID；iCode Teams 项目的 `--project` 使用 `teams`。
+
+当前主需求也支持重置：页面显示的 `MKT-001` 对应内部任务 ID `DEMO-MKT-001`，命令使用 `--project carddemo --task DEMO-MKT-001`。它保留需求和分配，仅清回开始前；`--remove` 仍只适用于新建的 `REQ-…` 需求。
+
+```sh
+npm run reset:task -- --project carddemo --task REQ-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+默认输出 JSON 预览，不修改数据。核对项目、任务及将清理的文件后，追加 `--apply` 执行：
+
+```sh
+npm run reset:task -- --project carddemo --task REQ-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx --apply
+```
+
+重置保留需求内容、交付人和计划完成日期，清除该需求的交付流程记录及预览中列出的独占生成资料、Teams 管理的会话运行目录，使需求可以从开始前重新运行。其他需求、业务代码、原始资料和原生 iCode 全局历史保留。工具会核对活动会话与服务归属，必要时暂时停止并重新启动所属 Teams 服务，不构建应用；无法安全确认范围时会拒绝执行。
+
+原始来源会话、trace 原始存档，以及缺少任务 ID、无法确认归属的历史分析均保留；这些来源资料不构成本次重新执行的四节点进度。
+
+执行会自动备份，默认位置为 Teams 当前 runtime 下的 `task-reset-backups/<UUID>`，实际路径以输出为准。`--remove` 可与任务参数一起使用，仅用于删除本地新建的 `REQ-…` 需求；不带 `--apply` 时仍然只预览。撤回时只使用该次输出的备份目录，无需重新指定项目或任务：
+
+```sh
+npm run reset:task -- --restore "/absolute/path/to/task-reset-backups/backup-id"
+npm run reset:task -- --restore "/absolute/path/to/task-reset-backups/backup-id" --apply
+```
+
+恢复前同样先核对预览并结束目标会话；备份后的新变化会接受冲突检查。需要纳入自定义目录中的 Teams CLI 回执时，可加 `--receipt-root` 并提供绝对目录，仍按精确项目和任务范围处理。
+
+macOS 入口为 `./重置任务.command`，Windows 为 `reset-task.cmd`，参数与上述命令一致；无参数时只显示帮助。也可在 `teams/` 内执行 `npm run reset:task -- …`。入口沿用已有本机配置，不会自动安装依赖或选择某个任务。
 
 ## 数据怎么流动
 

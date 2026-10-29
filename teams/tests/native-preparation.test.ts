@@ -11,7 +11,6 @@ import { queueTaskPreparation } from '../src/task-automation.js';
 import { ProjectWorkService, type WorkTransport } from '../server/project-work.js';
 import { preparationReadingEvidence, verifiedPreparation, type PreparationInput } from '../server/native-session-preparation.js';
 import { readFixtures } from '../server/http-shared.js';
-import { codeRoot } from '../server/config.js';
 // @ts-ignore native wrapper is deliberately dependency-free JavaScript.
 import { copyPreparedSession } from '../scripts/native/run-project-tui.mjs';
 const sha=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
@@ -61,7 +60,7 @@ test('prepared work remains task/assignee bound, idempotent and resumes only the
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 
-test('preparation uses the assignee project binding and Card default without replacing invalid explicit directories',async()=>{
+test('preparation requires a configured directory and preserves exact assignee/explicit directories',async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),'native-prepare-directory-'))),ownerRepo=join(dir,'owner'),memberRepo=join(dir,'member'),state=initialState();
  try{
   for(const repo of [ownerRepo,memberRepo]){await mkdir(repo);execFileSync('git',['init','-q',repo]);}
@@ -70,7 +69,7 @@ test('preparation uses the assignee project binding and Card default without rep
   const preparation=state.workspace.taskAutomation!.find(record=>record.taskId===scope.taskId)!.preparation!;preparation.status='preparing-session';
   const transport:WorkTransport={defaults:async()=>({agent:'code',agentLabel:'Code',model:'model',modelLabel:'Model',terminal:{id:'ghostty',name:'Ghostty'}}),history:async()=>({available:false,directory:'',title:'',active:null}),focus:async()=>{throw new Error('not supported');},start:async()=>{throw new Error('must not launch');}};
   const calls:PreparationInput[]=[],service=new ProjectWorkService(()=>state,fixtures,dir,transport,async input=>{calls.push(input);throw new Error('validated preparation transport reached');},dir),target={...scope,tab:'delivery',nodeId:'prepare'};
-  const defaultPlan=await service.plan('member',target);assert.equal(defaultPlan.directory.root,await realpath(codeRoot));assert.equal(defaultPlan.directory.valid,true);assert.equal(defaultPlan.directory.kind,'imported-snapshot');
+  const defaultPlan=await service.plan('member',target);assert.equal(defaultPlan.directory.root,null);assert.equal(defaultPlan.directory.valid,false);assert.match(defaultPlan.directory.diagnostic,/项目工作区/);
   await service.bind('owner',target,ownerRepo);await service.bind('member',target,memberRepo);
   await assert.rejects(service.prepare('member',scope,preparation.id),/validated preparation transport reached/);assert.equal(calls.length,1);assert.equal(calls[0].directory,await realpath(memberRepo));
   task.workDirectory=join(dir,'explicit-missing');const missing=await service.prepare('member',scope,preparation.id);assert.equal(missing.status,'waiting-directory');assert.equal(calls.length,1);delete task.workDirectory;
