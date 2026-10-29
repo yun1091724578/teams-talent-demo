@@ -1,12 +1,17 @@
 import {readFile,open,mkdir} from 'node:fs/promises';
 import {join,isAbsolute,resolve} from 'node:path';
 import {spawn} from 'node:child_process';
-import {planTaskReset,applyTaskReset,restoreTaskReset,verifyTaskResetPlan,atomicResetText as atomicText,type ResetPlan} from '../server/task-reset.js';
-import {acquireTaskMaintenance} from '../server/task-maintenance.js';
+import type {ResetPlan} from '../server/task-reset.js';
+// The reset modules pull in the state store and therefore read the local configuration at module load.
+// They are imported inside main() so that --help never depends on a valid configuration.
+let atomicText: typeof import('../server/task-reset.js')['atomicResetText'];
 const help=`精确清回一个试跑需求；默认只预览，不改业务源码。\n\n  npm run reset:task -- --project carddemo --task REQ-... [--apply] [--remove]\n  npm run reset:task -- --restore /absolute/backup [--apply]\n\n--remove 仅删除新增 REQ 记录；默认保留原文、交付人和排期，清回待开始。\n--receipt-root /absolute/path 可重复，用于已知旧 CLI 回执目录。\n--apply 先核验活动会话和服务归属，备份后仅清目标；必要时停启本仓 Teams，不构建。\n请先结束目标需求的 iCode 会话。全局原生会话、源码、已跟踪/共享资料、Talents 与 trace 原始存档保留。\n--restore 仅当清理后的文件未再变化时恢复本次备份。`;
 const args=process.argv.slice(2);
 if(!args.length||args.length===1&&args[0]==='--help'){console.log(help);}else await main().catch(error=>{console.error(JSON.stringify({ok:false,error:error instanceof Error?error.message:String(error)}));process.exitCode=1;});
 async function main(){
+ const {planTaskReset,applyTaskReset,restoreTaskReset,verifyTaskResetPlan,atomicResetText}=await import('../server/task-reset.js');
+ const {acquireTaskMaintenance}=await import('../server/task-maintenance.js');
+ atomicText=atomicResetText;
  const values:Record<string,string>={},receiptRoots:string[]=[];let apply=false,remove=false;
  for(let i=0;i<args.length;i++){const name=args[i];if(name==='--apply'){if(apply)throw Error('重复 apply');apply=true;}else if(name==='--remove'){if(remove)throw Error('重复 remove');remove=true;}else if(['--project','--task','--restore','--receipt-root'].includes(name)){const value=args[++i];if(!value||value.startsWith('--'))throw Error(name+' 缺少值');if(name==='--receipt-root')receiptRoots.push(value);else{if(values[name])throw Error('重复参数 '+name);values[name]=value;}}else throw Error('未知参数 '+name);}
  if(values['--restore']?(values['--project']||values['--task']||remove||receiptRoots.length):(!values['--project']||!values['--task']))throw Error('project/task 必须同时指定；restore 独立使用');

@@ -52,8 +52,13 @@ test('regenerated snapshot timestamp alone permits restore, but other shared cha
  const {backup}=await applyTaskReset(await planTaskReset(f.options)),path=join(f.shared,'teams/snapshot.json');const snapshot=JSON.parse(await readFile(path,'utf8'));snapshot.exportedAt=new Date().toISOString();await put(path,snapshot);await restoreTaskReset(backup,true);
  const second=await applyTaskReset(await planTaskReset(f.options));const changed=JSON.parse(await readFile(path,'utf8'));changed.projects.push({id:'new-project'});await put(path,changed);await assert.rejects(restoreTaskReset(second.backup,true),/又被修改/);
 }));
-test('symlinks are refused and --remove only removes the exact newly-created requirement',async()=>fixture(async f=>{
- await rm(f.document);await symlink(f.tracked,f.document,process.platform==='win32'?'file':undefined);await assert.rejects(planTaskReset(f.options),/软链接/);await rm(f.document);await put(f.document,'任务生成说明');const {backup}=await applyTaskReset(await planTaskReset({...f.options,remove:true}));const state=JSON.parse(await readFile(join(f.runtime,'state.json'),'utf8'));assert.deepEqual(state.workspace.deliveryRequirements.map((item:any)=>item.id),[f.other.id]);await restoreTaskReset(backup,true);
+test('symlinks are refused and --remove only removes the exact newly-created requirement',async t=>fixture(async f=>{
+ // Windows only creates symlinks with Developer Mode or the create-symlink privilege; where that is refused the
+ // refusal behaviour is exercised on the platforms that allow it instead of failing the fixture.
+ const canSymlink=async()=>{const probe=join(f.root,'symlink-probe.md');try{await symlink(f.tracked,probe,process.platform==='win32'?'file':undefined);await rm(probe,{force:true});return true;}catch{return false;}};
+ if(await canSymlink()){await rm(f.document);await symlink(f.tracked,f.document,process.platform==='win32'?'file':undefined);await assert.rejects(planTaskReset(f.options),/软链接/);await rm(f.document);}
+ else t.diagnostic('symlink creation is refused on this machine, so the symlink-refusal assertion is skipped here');
+ await put(f.document,'任务生成说明');const {backup}=await applyTaskReset(await planTaskReset({...f.options,remove:true}));const state=JSON.parse(await readFile(join(f.runtime,'state.json'),'utf8'));assert.deepEqual(state.workspace.deliveryRequirements.map((item:any)=>item.id),[f.other.id]);await restoreTaskReset(backup,true);
 }));
 test('writer lease excludes service and maintenance races; help does not read local configuration or state',async()=>fixture(async f=>{
  const release=await acquireTaskMaintenance(f.runtime,'service');await assert.rejects(acquireTaskMaintenance(f.runtime,'reset'),/正在由/);await release();const reset=await acquireTaskMaintenance(f.runtime,'reset');await assert.rejects(acquireTaskMaintenance(f.runtime,'service'),/正在由/);await reset();
