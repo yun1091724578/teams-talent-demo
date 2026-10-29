@@ -24,7 +24,7 @@ export async function staticFile(path: string, app: 'teams', response: ServerRes
   const name = path.startsWith('/main.') ? path.slice(1) : 'index.html';
   let content = await readFile(join(root, 'dist', name));
   if (name === 'index.html') {
-    const runtime = JSON.stringify({ app, teamsOrigin: origin, talentOrigin }).replaceAll('<', '\\u003c');
+    const runtime = JSON.stringify({ app, teamsOrigin: origin, talentOrigin, defaultLocale: process.env.DEMO_LOCALE === 'en' ? 'en' : 'zh' }).replaceAll('<', '\\u003c');
     content = Buffer.from(content.toString().replace('<script type="module"', `<script type="application/json" id="demo-system-runtime">${runtime}</script><script type="module"`));
   }
   const type = name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.map') ? 'application/json' : 'text/html';

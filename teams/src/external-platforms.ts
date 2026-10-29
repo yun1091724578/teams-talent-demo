@@ -1,11 +1,23 @@
 /** Demo sources only. These definitions do not connect to external platforms. */
-export const externalPlatforms = [
-  { id: 'repository', name: '代码托管平台', dataTypes: ['代码'], description: 'CardDemo 代码仓与版本快照。' },
-  { id: 'requirements', name: '需求平台', dataTypes: ['需求'], description: '业务需求、范围与验收标准。' },
-  { id: 'defects', name: '缺陷平台', dataTypes: ['问题单', '缺陷'], description: '问题单、缺陷描述与处理状态。' },
-  { id: 'design-library', name: '设计文档 / 知识库', dataTypes: ['设计', '原始资料'], description: '原始设计文档、接口约定与业务说明。' },
-  { id: 'test-assets', name: '测试资产平台', dataTypes: ['测试用例'], description: '客户资格、周期边界、金额精度与重复处理的测试用例。' },
-] as const;
+import { currentT, type MessageKey } from '../../shared/i18n/index.js';
+
+// Names, data types and descriptions are product copy: the ids stay stable and the text follows the UI language.
+const text: Record<string, { name: MessageKey; dataTypes: MessageKey[]; description: MessageKey }> = {
+  repository: { name: 'plat.repository.name', dataTypes: ['plat.repository.dataType'], description: 'plat.repository.desc' },
+  requirements: { name: 'plat.requirements.name', dataTypes: ['plat.requirements.dataType'], description: 'plat.requirements.desc' },
+  defects: { name: 'plat.defects.name', dataTypes: ['plat.defects.dataType1', 'plat.defects.dataType2'], description: 'plat.defects.desc' },
+  'design-library': { name: 'plat.designLibrary.name', dataTypes: ['plat.designLibrary.dataType1', 'plat.designLibrary.dataType2'], description: 'plat.designLibrary.desc' },
+  'test-assets': { name: 'plat.testAssets.name', dataTypes: ['plat.testAssets.dataType'], description: 'plat.testAssets.desc' },
+};
+const ids = ['repository', 'requirements', 'defects', 'design-library', 'test-assets'] as const;
+type PlatformId = typeof ids[number];
+
+export const externalPlatforms = ids.map(id => Object.defineProperties({ id } as { id: PlatformId; name: string; dataTypes: string[]; description: string }, {
+  name: { get: () => currentT(text[id].name), enumerable: true },
+  dataTypes: { get: () => text[id].dataTypes.map(key => currentT(key)), enumerable: true },
+  description: { get: () => currentT(text[id].description), enumerable: true },
+}));
+
 export function externalPlatformDefault(id: string) {
   const source = externalPlatforms.find(item => item.id === id);
   return source ? { id: source.id, name: source.name, kind: 'asset', enabled: true, description: source.description } : undefined;

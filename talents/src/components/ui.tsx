@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Card, Empty, Tag, Tooltip } from 'antd';
 import { InfoCircleOutlined, BranchesOutlined, CodeOutlined, ExperimentOutlined, FileSearchOutlined, FileTextOutlined, FolderOpenOutlined, MessageOutlined, ProjectOutlined, ToolOutlined } from '@ant-design/icons';
 import type { Artifact, Capability, Source } from '../types.ts';
+import { useT } from '../i18n.tsx';
 import { status } from '../demo/knowledge.ts';
 import { isDiagnosis, pendingCount } from '../demo/suggestions.ts';
 
@@ -40,12 +41,15 @@ export const EmptyState = ({ title, children }: { title?: ReactNode; children?: 
   <Empty className="talents-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description={<>{title && <b>{title}</b>}{children && <span>{children}</span>}</>} />;
 
 export function ArtifactStatus({ a }: { a: Artifact }) {
-  if (isDiagnosis(a)) return pendingCount(a) ? <Tag color="warning">待提交</Tag> : <Tag color="success">建议已处理</Tag>;
+  const t = useT();
+  if (isDiagnosis(a)) return pendingCount(a) ? <Tag color="warning">{t('ui.pendingSubmit')}</Tag> : <Tag color="success">{t('ui.suggestionsHandled')}</Tag>;
   const st = status(a);
-  if (st === 'draft') return <Tag color="warning">待审阅</Tag>;
-  if (st === 'update') return <Tag color="warning">新版本待审阅</Tag>;
-  return <Tag color="success">{a.kind === 'index' ? '远端索引' : a.submission ? 'PR 已创建' : '已有版本'} · v{a.published!.version}</Tag>;
+  if (st === 'draft') return <Tag color="warning">{t('ui.draft')}</Tag>;
+  if (st === 'update') return <Tag color="warning">{t('ui.newVersionDraft')}</Tag>;
+  return <Tag color="success">{a.kind === 'index' ? t('ui.remoteIndex') : a.submission ? t('ui.prCreated') : t('ui.hasVersion')} · v{a.published!.version}</Tag>;
 }
 /** 新 / 改 / 删 markers next to file names. */
-export const FileMark = ({ kind }: { kind: 'new' | 'mod' | 'del' }) =>
-  <Tag className="file-mark" bordered={false} color={kind === 'new' ? 'success' : kind === 'del' ? 'error' : 'warning'}>{{ new: '新', mod: '改', del: '删' }[kind]}</Tag>;
+export const FileMark = ({ kind }: { kind: 'new' | 'mod' | 'del' }) => {
+  const t = useT();
+  return <Tag className="file-mark" bordered={false} color={kind === 'new' ? 'success' : kind === 'del' ? 'error' : 'warning'}>{kind === 'new' ? t('ui.new') : kind === 'del' ? t('ui.del') : t('ui.mod')}</Tag>;
+};

@@ -1,6 +1,10 @@
 import type { DemoState } from './domain.js';
+import { currentT, type MessageKey } from '../../shared/i18n/index.js';
 
 export type Presence = '未使用' | '离线' | '在线空闲' | '执行中' | '等待人工处理';
+/** The enum values are business keys; this is the label shown in the UI. */
+const presenceKeys: Record<Presence, MessageKey> = { '未使用': 'presence.unused', '离线': 'presence.offline', '在线空闲': 'presence.online', '执行中': 'presence.running', '等待人工处理': 'presence.waiting' };
+export const presenceLabel = (value: Presence): string => currentT(presenceKeys[value]);
 export interface DemoInstance { id: string; state: Presence; task: string; project: string }
 export interface DemoMember { id: string; name: string; used: boolean; today: boolean; lastActive: string; tokens: number; instances: DemoInstance[] }
 export function teamUsage(state: DemoState): DemoMember[] {

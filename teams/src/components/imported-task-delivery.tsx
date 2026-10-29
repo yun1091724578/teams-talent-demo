@@ -1,8 +1,10 @@
-import {useTaskNodeInputs} from './use-task-node-inputs.js';
+﻿import {useTaskNodeInputs} from './use-task-node-inputs.js';
 import { Alert, Button, Collapse, Empty, List, Space, Tag } from 'antd';
 import type { Presentation } from '../api.js';
 import { useDemo } from '../context.js';
-import { displayText } from '../display-text.js';
+import { useT } from '../i18n.js';
+import { displayText, selectionNote } from '../display-text.js';
+import { labelText } from '../task-labels-en.js';
 import { deliveryStages, importedSelectedStage, importedStage, importedTaskNodeView } from '../imported-delivery.js';
 import { TaskNodeArtifacts, TaskCompletionCriteria, nodeArtifactSummary } from './task-node-artifacts.js';
 import { TaskDeliveryLayout, deliveryNodeLabels } from './task-delivery-layout.js';
@@ -12,15 +14,17 @@ import { TaskDeliveryFlow, importedStatusTones } from './task-delivery-flow.js';
 
 export function ImportedTaskDelivery({ snapshot: s, params, jump, sidebarItems }: { sidebarItems?: readonly DeliveryTaskListItem[]; snapshot: Presentation['teamsProject']; params: URLSearchParams; jump(tab: string, extra?: Record<string, string>): void }) {
   const { showText, role } = useDemo();
+  const t = useT();
 
   const task = s.tasks.find(item => item.id === (params.get('task') ?? s.selection.taskId));
-  if (!task) return <Alert type="error" title="任务未包含在导入快照中" action={<Button onClick={() => jump('management')}>查看任务清单</Button>} />;
+  if (!task) return <Alert type="error" title={t('itd.taskMissing')} action={<Button onClick={() => jump('management')}>{t('itd.viewTaskList')}</Button>} />;
   const node = importedSelectedStage(task, params.get('node'), task.id === s.selection.taskId ? s.selection.nodeId : undefined);
-  if (!node) return <Alert type="error" title="交付节点不存在" action={<Button onClick={() => jump('delivery', { task: task.id })}>返回任务</Button>} />;
+  if (!node) return <Alert type="error" title={t('itd.nodeMissing')} action={<Button onClick={() => jump('delivery', { task: task.id })}>{t('itd.backToTask')}</Button>} />;
   return <ImportedTaskBody key={task.id+':'+node+':'+role} s={s} task={task} node={node} jump={jump} sidebarItems={sidebarItems}/>;
 }
 function ImportedTaskBody({s,task,node,jump,sidebarItems}:{sidebarItems?:readonly DeliveryTaskListItem[];s:Presentation['teamsProject'];task:Presentation['teamsProject']['tasks'][number];node:import('../delivery-requirements.js').RequirementNode;jump(tab:string,extra?:Record<string,string>):void}){
   const {showText,role,data}=useDemo();
+  const t = useT();
   const inputsRead=useTaskNodeInputs('teams',task.id,node);
   const view = importedTaskNodeView(task, node,inputsRead.value,data);
   const go = (node: string) => jump('delivery', { task: task.id, node });
@@ -31,31 +35,31 @@ function ImportedTaskBody({s,task,node,jump,sidebarItems}:{sidebarItems?:readonl
   const route = (id: string, stage: string) => 'projects?' + new URLSearchParams({ project: 'teams', tab: 'delivery', task: id, node: stage });
   const input = <>
     <p className="task-node-requirement">{displayText(task.goal)}</p>
-    {inputsRead.error&&<Alert type="warning" title="Talent 节点输入读取未完成" description={inputsRead.error} action={<Button onClick={inputsRead.refresh}>重新获取</Button>}/>}
-    <p className="muted">{inputsRead.value?.selection.note??(inputsRead.pending?'正在读取节点输入':'尚无相关输入')}</p>
+    {inputsRead.error&&<Alert type="warning" title={t('itd.inputsFailed')} description={inputsRead.error} action={<Button onClick={inputsRead.refresh}>{t('itd.refetch')}</Button>}/>}
+    <p className="muted">{selectionNote(inputsRead.value?.selection)??(inputsRead.pending?t('itd.readingInputs'):t('itd.noInputs'))}</p>
     <TaskNodeArtifacts items={view.inputs} onSource={go} />
-    <div className="task-node-input-summary"><span>原项目版本 {task.version}</span><span>{selected.nodes.length} 个来源环节</span><span>来源输入，尚无本次采用记录</span></div>
-    {task.type === '调研' && <p className="muted">本任务为来源调研；本阶段保留调研与建议记录。</p>}
-    <Collapse ghost size="small" items={[{ key: 'inputs', label: '查看需求、来源版本与上游结果', children: <div className="page-stack"><p>范围：{displayText(task.scope)}</p><ul>{task.criteria.map(item => <li key={item}>{item}</li>)}</ul><p className="muted">来源：{displayText(task.origin)} · 源码版本 {s.sourceCommit.slice(0, 7)}</p><List size="small" header="原流程上游成果" dataSource={previous} locale={{ emptyText: '原流程未提供更早的成果' }} renderItem={item => <List.Item><div><strong>{item.name}</strong><p>{displayText(item.output)}</p></div></List.Item>} /><Button size="small" onClick={() => detail('完整任务来源', task)}>查看原任务数据</Button></div> }]} />
+    <div className="task-node-input-summary"><span>{t('itd.sourceVersion', { version: task.version })}</span><span>{t('itd.sourceNodeCount', { count: selected.nodes.length })}</span><span>{t('itd.noAdoption')}</span></div>
+    {task.type === '调研' && <p className="muted">{t('itd.researchNote')}</p>}
+    <Collapse ghost size="small" items={[{ key: 'inputs', label: t('itd.viewRequirement'), children: <div className="page-stack"><p>{t('itd.scope', { scope: displayText(task.scope) })}</p><ul>{task.criteria.map(item => <li key={item}>{item}</li>)}</ul><p className="muted">{t('itd.sourceLine', { origin: displayText(task.origin), commit: s.sourceCommit.slice(0, 7) })}</p><List size="small" header={t('itd.upstream')} dataSource={previous} locale={{ emptyText: t('itd.noUpstream') }} renderItem={item => <List.Item><div><strong>{item.name}</strong><p>{displayText(item.output)}</p></div></List.Item>} /><Button size="small" onClick={() => detail(t('itd.fullTaskSource'), task)}>{t('itd.viewTaskData')}</Button></div> }]} />
   </>;
   const execution = <>
-    <div className="task-node-execution-summary"><span>来源状态 · {selected.status}</span><span>{sessions.length} 条关联作业快照</span></div>
-    <p className="muted">原项目节点记录按四个交付阶段归类，未记为本次 iCode 执行。Talent 自动导入与归集没有本次执行回执。</p>
-    <section className="task-process-progress" aria-label="任务进展"><h3>任务进展</h3><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无此节点的 CLI 进度回传" /></section>
+    <div className="task-node-execution-summary"><span>{t('itd.sourceStatus', { status: labelText(selected.status) })}</span><span>{t('itd.sessionSnapshotCount', { count: sessions.length })}</span></div>
+    <p className="muted">{t('itd.executionNote')}</p>
+    <section className="task-process-progress" aria-label={t('itd.progressAria')}><h3>{t('itd.progress')}</h3><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('itd.noProgress')} /></section>
     <TaskSessionActivity key={task.id + ':' + node + ':' + role} projectId="teams" taskId={task.id} nodeId={node} readonlySource />
-    {selected.nodes.length ? <Collapse ghost size="small" items={[{ key: 'records', label: '查看本阶段原节点与作业记录', children: <div className="page-stack"><List size="small" dataSource={selected.nodes} renderItem={item => <List.Item data-imported-source-node={item.id}><div><Space wrap><strong>{item.name}</strong><Tag>{item.status}</Tag><span className="muted">{item.owner}</span></Space><p className="task-node-fulltext">{displayText(item.brief)}</p><Button size="small" onClick={() => detail(item.name + ' · 原节点数据', item)}>查看原节点详情</Button></div></List.Item>} />{sessions.map(session => <div key={session.key} data-imported-session={session.key}><strong>{displayText(session.title)}</strong><p>{displayText(session.resultText)}</p><Button size="small" onClick={() => detail('原作业上下文', session)}>查看原作业上下文</Button></div>)}</div> }]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="来源未提供此阶段记录" />}
+    {selected.nodes.length ? <Collapse ghost size="small" items={[{ key: 'records', label: t('itd.viewOriginalNodes'), children: <div className="page-stack"><List size="small" dataSource={selected.nodes} renderItem={item => <List.Item data-imported-source-node={item.id}><div><Space wrap><strong>{item.name}</strong><Tag>{labelText(item.status)}</Tag><span className="muted">{item.owner}</span></Space><p className="task-node-fulltext">{displayText(item.brief)}</p><Button size="small" onClick={() => detail(t('itd.nodeDataTitle', { name: item.name }), item)}>{t('itd.viewNodeDetail')}</Button></div></List.Item>} />{sessions.map(session => <div key={session.key} data-imported-session={session.key}><strong>{displayText(session.title)}</strong><p>{displayText(session.resultText)}</p><Button size="small" onClick={() => detail(t('itd.jobContext'), session)}>{t('itd.viewJobContext')}</Button></div>)}</div> }]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('itd.noStageRecords')} />}
   </>;
   const result = <>
-    <p>按统一节点标准核对交付物；原流程成果保留原文，不自动认定为对应标准产物。</p>
-    <h3 className="task-deliverables-heading">交付物</h3><TaskNodeArtifacts items={view.deliverables} onSource={go} /><TaskCompletionCriteria view={view} />
+    <p>{t('itd.resultNote')}</p>
+    <h3 className="task-deliverables-heading">{t('itd.deliverables')}</h3><TaskNodeArtifacts items={view.deliverables} onSource={go} /><TaskCompletionCriteria view={view} />
 
-    {node === 'verify' && <p className="muted">来源验证记录未包含本次实际检查或预置复检回执，不据此变更本地质量状态。</p>}
-    {node === 'accept' && <p className="muted">原验收状态仅供查阅；此页不会形成新的 Owner 确认或 Talent 上报。</p>}
+    {node === 'verify' && <p className="muted">{t('itd.verifyNote')}</p>}
+    {node === 'accept' && <p className="muted">{t('itd.acceptNote')}</p>}
   </>;
-  return <TaskDeliveryLayout projectId="teams" taskId={task.id} title={task.title} owner={'成员 ' + task.owner} node={node} nodeOwner={'来源责任人 · ' + selected.owner} contentKey={task.id + ':' + node + ':' + role}
-    sidebar={<DeliveryTaskSidebar projectId="teams" selectedTaskId={task.id} items={sidebarItems ?? s.tasks.map(item => ({ id: item.id, title: item.title, owner: '成员 ' + item.owner, status: item.status, accepted: item.status === '已验收', route: route(item.id, importedSelectedStage(item, null, item.id === s.selection.taskId ? s.selection.nodeId : undefined)!) }))} />}
-    flow={<TaskDeliveryFlow scope={{ projectId: 'teams', taskId: task.id }} nodeInputs={inputsRead.value} readonly selected={node} onSelect={id => jump('delivery', { task: task.id, node: id })} nodes={deliveryStages.map(id => { const stage = importedStage(task, id); return { id, label: deliveryNodeLabels[id], role: stage.owner, description: '', status: stage.status, statusTone: importedStatusTones[stage.status] ?? 'default', complete: false, summary: nodeArtifactSummary(importedTaskNodeView(task, id)) }; })} />}
-    sections={{ input: { action: <Tag>原项目输入</Tag>, content: input }, execution: { action: <Tag>来源记录 · 只读</Tag>, content: execution }, result: { content: result } }}
-    materials={<><h4>需求说明</h4><div className="task-material-description"><p>{displayText(task.goal)}</p><p>范围：{displayText(task.scope)}</p></div><h4>验收标准</h4><ul className="task-material-criteria">{task.criteria.map(item => <li key={item}>{item}</li>)}</ul><h4>来源资料</h4><p>{displayText(task.origin)}</p><p className="muted">原项目版本 {task.version} · 截止 {task.due}</p><Button type="link" size="small" onClick={() => detail('完整任务来源', task)}>查看原任务数据</Button></>}
+  return <TaskDeliveryLayout projectId="teams" taskId={task.id} title={task.title} owner={t('itd.memberOwner', { name: task.owner })} node={node} nodeOwner={t('itd.nodeOwner', { name: selected.owner })} contentKey={task.id + ':' + node + ':' + role}
+    sidebar={<DeliveryTaskSidebar projectId="teams" selectedTaskId={task.id} items={sidebarItems ?? s.tasks.map(item => ({ id: item.id, title: item.title, owner: t('itd.memberOwner', { name: item.owner }), status: labelText(item.status), accepted: item.status === '已验收', route: route(item.id, importedSelectedStage(item, null, item.id === s.selection.taskId ? s.selection.nodeId : undefined)!) }))} />}
+    flow={<TaskDeliveryFlow scope={{ projectId: 'teams', taskId: task.id }} nodeInputs={inputsRead.value} readonly selected={node} onSelect={id => jump('delivery', { task: task.id, node: id })} nodes={deliveryStages.map(id => { const stage = importedStage(task, id); return { id, label: deliveryNodeLabels[id], role: stage.owner, description: '', status: labelText(stage.status), statusTone: importedStatusTones[stage.status] ?? 'default', complete: false, summary: nodeArtifactSummary(importedTaskNodeView(task, id)) }; })} />}
+    sections={{ input: { action: <Tag>{t('itd.originalInput')}</Tag>, content: input }, execution: { action: <Tag>{t('itd.sourceReadOnly')}</Tag>, content: execution }, result: { content: result } }}
+    materials={<><h4>{t('itd.requirement')}</h4><div className="task-material-description"><p>{displayText(task.goal)}</p><p>{t('itd.scope', { scope: displayText(task.scope) })}</p></div><h4>{t('itd.criteria')}</h4><ul className="task-material-criteria">{task.criteria.map(item => <li key={item}>{item}</li>)}</ul><h4>{t('itd.sourceMaterials')}</h4><p>{displayText(task.origin)}</p><p className="muted">{t('itd.sourceMeta', { version: task.version, due: task.due })}</p><Button type="link" size="small" onClick={() => detail(t('itd.fullTaskSource'), task)}>{t('itd.viewTaskData')}</Button></>}
   />;
 }

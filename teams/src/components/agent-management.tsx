@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+﻿import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Alert, Button, Descriptions, Space, Modal, Input } from 'antd';
 import { getTools, native, getProjectWorkspaces, saveProjectWorkspace, type NativeStatus } from '../api.js';
 import { Context, useDemo, type DemoContext } from '../context.js';
+import { useLocale } from '../i18n.js';
+import { serverText } from '../task-labels-en.js';
+import { currentT as vt } from '../../../shared/i18n/index.js';
 import { Origin } from './common.js';
 import { mount } from '../vendor/teams/agent-management/index.js';
 import { mountConfigurationEditor } from '../vendor/teams/agent-management/configuration-editor.js';
@@ -18,81 +21,81 @@ const demoVersion = 'demo-local-1';
 // This adapter supplies demonstration records to the copied Teams editor.
 // It deliberately has no native configuration write, install, or catalog transport.
 function configurationPort(tool: Tool, demo: DemoContext): ConfigurationPort {
-  const source = '当前页面只读';
+  const source = vt('am.ui.readOnlySource');
   const project = demo.state.workspace.project.name;
   const records = new Map<ManagedCategory, ConfigurationDocument[]>();
   const add = (category: ManagedCategory, id: string, name: string, scope: string, value: Record<string, string>, origin: string) => {
     const document: ConfigurationDocument = {
       resource: { id, name, scope, source: origin, readOnly: true },
       content: JSON.stringify(value, null, 2), revision: 'local-1', format: 'JSON',
-      rawTitle: '配置内容', formatDescription: '配置投影 · 未读取或改写原生配置文件',
+      rawTitle: vt('am.ui.configContent'), formatDescription: vt('am.ui.configProjection'),
       native: value, readOnly: true,
     };
     records.set(category, [...(records.get(category) ?? []), document]);
   };
   if (tool === 'icode') {
-    add('agent', 'code-agent', `Code Agent ${demo.state.adoptedAgent}`, `项目采用 · ${project}`, {
+    add('agent', 'code-agent', `Code Agent ${demo.state.adoptedAgent}`, vt('am.ui.projectAdopted', { name: project }), {
       name: 'Code Agent', version: demo.state.adoptedAgent,
       instructions: demo.state.adoptedAgent === 'r2'
-        ? '读取项目上下文 → 分析与实施 → 检查实际测试退出码和报告 → 同步问题及证据 → 提交待确认成果。报告缺失保持待验证，功能与安全结论分别呈现。'
-        : '读取项目上下文 → 分析与实施 → 运行项目检查 → 提交成果与验证依据。',
-      model: '沿用原生 iCode 配置；本页未读取模型或凭据',
-      scope: '项目共享定义；当前任务采用版本保持冻结',
-      origin: 'Teams 项目定义；Talents 提供改进候选与评估',
-    }, 'Teams 项目采用记录');
+        ? vt('am.content.instructionsR2')
+        : vt('am.content.instructions'),
+      model: vt('am.content.modelIcode'),
+      scope: vt('am.content.scopeShared'),
+      origin: vt('am.content.originTeams'),
+    }, vt('am.ui.teamsAdoptionSource'));
     for (const skill of demo.data.skills.filter(item => demo.state.workspace.selectedSkills.includes(item.name))) {
-      add('skill', skill.name, skill.name, `项目选用 · ${project}`, {
+      add('skill', skill.name, skill.name, vt('am.ui.projectSelected', { name: project }), {
         name: skill.name, version: skill.version,
         description: skill.description,
         content: demo.data.skillContents[skill.name] ?? skill.description,
-        scope: '项目选用；尚未核验原生 Agent 实际读取状态',
-      }, '本机 Skill 素材 · 项目选用清单');
+        scope: vt('am.ui.projectSelectedScope'),
+      }, vt('am.ui.localSkillSource'));
     }
   } else {
-    add('agent', 'build', 'build', 'OpenCode 工作目录', {
-      name: 'build', description: 'OpenCode Agent 配置',
-      instructions: '分析项目变更并实施；由原生工具管理 Agent、权限问答与会话。',
-      model: '由 OpenCode 原生配置选择', scope: '当前工作目录 · 只读配置',
-    }, 'OpenCode 配置参考');
-    add('skill', 'change-impact', '变更影响分析', 'OpenCode 工作目录', {
-      name: 'change-impact', description: '白金卡消费返现的接口、业务规则与验证影响分析',
-      content: '核对需求范围、受影响模块和验证证据。',
-      scope: '本地发现路径；未写入 OpenCode',
-    }, 'OpenCode 配置参考');
+    add('agent', 'build', 'build', vt('am.ui.opencodeWorkdir'), {
+      name: 'build', description: vt('am.doc.opencodeAgentDesc'),
+      instructions: vt('am.content.opencodeInstructions'),
+      model: vt('am.content.modelOpencode'), scope: vt('am.ui.readOnlyWorkdir'),
+    }, vt('am.ui.opencodeSource'));
+    add('skill', 'change-impact', vt('am.doc.changeImpactTitle'), vt('am.ui.opencodeWorkdir'), {
+      name: 'change-impact', description: vt('am.doc.changeImpactDesc'),
+      content: vt('am.content.changeImpact'),
+      scope: vt('am.content.opencodeScope'),
+    }, vt('am.ui.opencodeSource'));
   }
-  add('model', 'native-model', '原生模型配置 · 说明', '当前系统用户', {
-    provider: '由原生工具管理', model: '未读取', variant: tool === 'opencode' ? '由 OpenCode 原生配置选择' : '由 iCode 原生配置选择',
-    credentials: '凭据保留在原生工具；此处不读取、不复制',
+  add('model', 'native-model', vt('am.doc.modelTitle'), vt('am.ui.systemUser'), {
+    provider: vt('am.ui.nativeManaged'), model: vt('am.ui.notRead'), variant: tool === 'opencode' ? vt('am.content.modelOpencode') : vt('am.content.modelIcodeNative'),
+    credentials: vt('am.ui.credentialsKept'),
   }, source);
-  add('mcp', 'native-mcp', 'MCP 接入 · 说明', '原生 Agent 所属配置', {
-    server: '尚未读取原生 MCP Server 列表', transport: '保留工具原生连接与权限语义',
-    scope: '此处不修改连接和凭据；连接状态待核验',
+  add('mcp', 'native-mcp', vt('am.doc.mcpTitle'), vt('am.ui.nativeAgentScope'), {
+    server: vt('am.ui.noMcpList'), transport: vt('am.ui.nativePermissions'),
+    scope: vt('am.ui.connectionScope'),
   }, source);
 
-  const labels: Record<string, string> = { name: '名称', version: '版本', instructions: '指令', model: '模型', scope: '作用范围', origin: '来源与职责', description: '说明', content: 'Skill 内容', provider: '服务商', variant: 'Variant / 原生选项', credentials: '凭据', server: 'Server', transport: '连接与权限' };
+  const labels: Record<string, string> = { name: vt('am.field.name'), version: vt('am.field.version'), instructions: vt('am.field.instructions'), model: vt('am.field.model'), scope: vt('am.field.scope'), origin: vt('am.field.origin'), description: vt('am.field.description'), content: vt('am.field.content'), provider: vt('am.field.provider'), variant: vt('am.field.variant'), credentials: vt('am.field.credentials'), server: vt('am.field.server'), transport: vt('am.field.transport') };
   return {
-    target: `${names[tool]} · 只读配置 · 未写入本机`, toolType: names[tool],
+    target: vt('am.ui.targetReadOnly', { tool: names[tool] }), toolType: names[tool],
     categories: ['agent', 'model', 'skill', 'mcp'],
     async list(category) { return (records.get(category) ?? []).map(document => document.resource); },
     async read(category, resource) {
       const document = records.get(category)?.find(item => item.resource.id === resource.id);
-      if (!document) throw new Error('资源已不存在，请重新读取');
+      if (!document) throw new Error(vt('am.ui.resourceGone'));
       return document;
     },
     groups(_category, document): ConfigurationGroup[] {
       const values = document.native as Record<string, string>;
-      return [{ title: '配置详情', description: '配置来源、项目选用和运行时实际加载分别呈现。', fields: Object.entries(values).map(([id, value]) => ({ id, label: labels[id] ?? id, value, kind: ['instructions', 'content', 'description'].includes(id) ? 'textarea' as const : 'text' as const, readOnly: true })) }];
+      return [{ title: vt('am.ui.configDetail'), description: vt('am.ui.configDetailNote'), fields: Object.entries(values).map(([id, value]) => ({ id, label: labels[id] ?? id, value, kind: ['instructions', 'content', 'description'].includes(id) ? 'textarea' as const : 'text' as const, readOnly: true })) }];
     },
-    patch() { throw new Error('此处配置只读；请在原生工具中修改'); },
+    patch() { throw new Error(vt('am.ui.readOnlyHere')); },
     validate() {},
-    async save() { throw new Error('尚未连接原生配置写入接口'); },
+    async save() { throw new Error(vt('am.ui.noNativeWrite')); },
   };
 }
 
 function unavailableConfiguration(container: HTMLElement, tool: Tool): AgentConfigurationController {
   const note = document.createElement('p'); note.className = ui.note; container.append(note);
   const selectCategory = (category: AgentCategory) => {
-    note.textContent = `${names[tool]} ${category === 'hook' ? 'Hook' : 'Plugin'}：尚未连接此原生配置接口。原 Teams 通过工具适配器按原生语义管理；本页不填充虚构配置。`;
+    note.textContent = vt('am.ui.capabilityMissing', { tool: names[tool], kind: category === 'hook' ? 'Hook' : 'Plugin' });
   };
   return { activate() {}, selectCategory, hasDrafts: () => false, isBusy: () => false, getTargetLabel: () => names[tool], dispose() { container.replaceChildren(); } };
 }
@@ -101,25 +104,28 @@ function OpenCodeDetails({ status }: { status: NativeStatus }) {
   const { role, run, showText } = useDemo();
   return <div className="agent-maintenance-detail"><Space><strong>OpenCode</strong><Origin kind="native" /></Space>
     <Descriptions column={1} size="small" items={[
-      { key: 'status', label: '本机状态', children: status.opencode.installed ? '已发现可执行命令' : status.opencode.unsupportedReason ?? '当前 PATH 中未发现 OpenCode' },
-      { key: 'version', label: '版本', children: status.opencode.version ?? '未取得' },
-      { key: 'entry', label: '程序入口', children: status.opencode.path ?? '未配置' },
+      { key: 'status', label: vt('am.ui.localStatus'), children: status.opencode.installed ? vt('am.ui.opencodeFound') : status.opencode.unsupportedReason ?? vt('am.ui.opencodeMissing') },
+      { key: 'version', label: vt('am.field.version'), children: status.opencode.version ?? vt('am.ui.notObtained') },
+      { key: 'entry', label: vt('am.ui.entry'), children: status.opencode.path ?? vt('am.ui.notConfigured') },
     ]} />
-    {!!status.opencode.notes?.length && <Alert type="warning" title="探测说明" description={status.opencode.notes.join('；')} />}
+    {!!status.opencode.notes?.length && <Alert type="warning" title={vt('am.ui.probeNote')} description={status.opencode.notes.join(vt('common.listSeparator'))} />}
     <Button type="primary" disabled={!status.opencode.installed} onClick={() => void run(async () => {
       const receipt = await native(role, 'launch', { tool: 'opencode', restore: false, requestId: crypto.randomUUID() });
-      showText('OpenCode 启动回执', JSON.stringify(receipt, null, 2));
-    })}>启动 OpenCode</Button>
-    <Alert type="info" title="OpenCode 原生 HTTP 接入" description="原 Teams 适配器支持会话与消息、Agent / Model / Variant 和权限问答。可查看只读配置并启动本机工具；尚未连接原生 HTTP 会话服务。" />
+      showText(vt('am.ui.opencodeReceipt'), JSON.stringify(receipt, null, 2));
+    })}>{vt('am.ui.startOpencode')}</Button>
+    <Alert type="info" title={vt('am.ui.opencodeHttp')} description={vt('am.ui.opencodeHttpNote')} />
   </div>;
 }
 
 export function AgentManagement({ nativeControls }: { nativeControls: ReactNode }) {
   const demo = useDemo(), latest = useRef(demo), node = useRef<HTMLDivElement>(null);
+  // The editor builds its DOM once at mount, so a language switch remounts it.
+  const { locale } = useLocale();
   const controls = useRef(nativeControls);
   const [panels, setPanels] = useState<Array<{ element: HTMLElement; content: () => ReactNode }>>([]);
   latest.current = demo; controls.current = nativeControls;
   useEffect(() => {
+    setPanels([]);
     const container = node.current!;
     const abort = new AbortController();
     let statusPromise: Promise<NativeStatus> | undefined;
@@ -131,7 +137,7 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
     const registrations = (['icode', 'opencode'] as const).map(id => ({ id, name: names[id], uiBundleId: id }));
     const observation: ObservedUiMountContext['observation'] = {
       observeBrowserOperation: async (_name, _attributes, body) => body({ event() {} }),
-      async tracedFetch() { throw new Error('工具适配器未声明该网络操作'); },
+      async tracedFetch() { throw new Error(vt('am.ui.undeclaredNetwork')); },
       async tracedJson<T>(_name: string, input: RequestInfo | URL, init?: RequestInit) {
         let value: unknown;
         if (input === '/api/bundles/contributions') {
@@ -142,11 +148,11 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
           else if (command.action === 'working-directory.list') value = { result: { directories: {} } };
           else if (command.action === 'working-directory.set') {
             const configuration=await getProjectWorkspaces(),selected=configuration.projects.find(item=>item.projectId===configuration.defaultProjectId);
-            if(!selected)throw new Error('请先到项目概览的工作区设置中配置本机目录');
+            if(!selected)throw new Error(vt('am.ui.workspaceFirst'));
             await saveProjectWorkspace(latest.current.role,{...selected,directory:String(command.cwd)});statusPromise=undefined;
             value = { result: {} };
-          } else throw new Error(`尚未接入 Teams 管理操作：${String(command.action)}`);
-        } else throw new Error(`工具适配器未声明该数据源：${String(input)}`);
+          } else throw new Error(vt('am.ui.unknownAction', { action: String(command.action) }));
+        } else throw new Error(vt('am.ui.unknownSource', { source: String(input) }));
         return { response: new Response(null, { status: 200 }), value: value as T };
       },
     };
@@ -155,7 +161,7 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
       setDirty() {}, reportError(error) { void latest.current.run(async () => { throw error; }); },
     };
     const loadModule = async (id: string): Promise<AgentUiModule & { version: string }> => {
-      if (id !== 'icode' && id !== 'opencode') throw new Error('未知工具适配器');
+      if (id !== 'icode' && id !== 'opencode') throw new Error(vt('am.ui.unknownAdapter'));
       const tool = id;
       return { agentUiApi: AGENT_UI_API, version: demoVersion, createAgentUi() {
         return {
@@ -163,55 +169,55 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
             const current = await status(), found = current[tool], port = configurationPort(tool, latest.current);
             const discovered = 'source' in found ? found.source : undefined;
             return [{
-              id: tool, name: names[tool], kind: '本机命令行工具', path: found.path ?? undefined, version: found.version ?? undefined,
-              state: found.installed ? '本机已发现' : '本机未安装',
-              identity: `${found.version ?? '版本未取得'} · 当前设备 / 当前系统用户 · 配置只读`,
-              facts: [{ label: '数据来源', value: '本机探测 /api/tools；配置只读' }, ...(discovered ? [{ label: '发现方式', value: discovered === 'official' ? '官方安装位置自动发现' : discovered === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : discovered === 'uv' ? 'uv tool 安装回执' : discovered === 'pipx' ? 'pipx 虚拟环境' : discovered === 'path' ? 'PATH 中的 icode 可执行文件' : discovered === 'missing' ? '未发现可用安装' : '仓库内开发包' }] : []), { label: '程序路径', value: found.path ?? '未配置' }, { label: '版本', value: found.version ?? '未取得' }, { label: '维护能力', value: '尚未连接安装、升级和配置写入服务' }],
+              id: tool, name: names[tool], kind: vt('am.ui.localCli'), path: found.path ?? undefined, version: found.version ?? undefined,
+              state: found.installed ? vt('am.ui.localFound') : vt('am.ui.localMissing'),
+              identity: vt('am.ui.identity', { version: found.version ?? vt('am.ui.versionUnknown') }),
+              facts: [{ label: vt('am.ui.dataSource'), value: vt('am.ui.dataSourceValue') }, ...(discovered ? [{ label: vt('am.ui.discovery'), value: discovered === 'official' ? vt('am.ui.discoveryOfficial') : discovered === 'override' ? vt('am.ui.discoveryOverride') : discovered === 'uv' ? vt('am.ui.discoveryUv') : discovered === 'pipx' ? vt('am.ui.discoveryPipx') : discovered === 'path' ? vt('am.ui.discoveryPath') : discovered === 'missing' ? vt('am.ui.discoveryMissing') : vt('am.ui.discoveryBundled') }] : []), { label: vt('am.ui.programPath'), value: found.path ?? vt('am.ui.notConfigured') }, { label: vt('am.field.version'), value: found.version ?? vt('am.ui.notObtained') }, { label: vt('am.ui.maintenance'), value: vt('am.ui.maintenanceValue') }],
               categories: [
-                { category: 'agent', label: 'Agent', description: tool === 'icode' ? `项目采用 Code Agent ${latest.current.state.adoptedAgent}` : 'Agent / 角色 · OpenCode 配置' },
-                { category: 'model', label: 'Model', description: '服务商与模型由原生工具管理 · 查看接入说明' },
-                { category: 'skill', label: 'Skill', description: tool === 'icode' ? `${latest.current.state.workspace.selectedSkills.length} 个项目选用 Skill · 只读素材` : 'Skill / 本地发现路径' },
-                { category: 'mcp', label: 'MCP', description: '保留原生 Server 连接与权限 · 查看接入说明' },
-                { category: 'hook', label: 'Hook', description: '事件与执行配置', unavailableReason: '尚未连接原生 Hook 配置接口' },
-                { category: 'plugin', label: 'Plugin', description: '工具原生扩展', unavailableReason: tool === 'opencode' ? '原生 Plugin 尚未连接' : '当前 iCode 适配器未开放 Plugin 管理' },
+                { category: 'agent', label: 'Agent', description: tool === 'icode' ? vt('am.ui.catAgentDesc', { version: latest.current.state.adoptedAgent }) : vt('am.ui.catAgentOpenCode') },
+                { category: 'model', label: 'Model', description: vt('am.ui.catModelDesc') },
+                { category: 'skill', label: 'Skill', description: tool === 'icode' ? vt('am.ui.catSkillDesc', { count: latest.current.state.workspace.selectedSkills.length }) : vt('am.ui.catSkillOpenCode') },
+                { category: 'mcp', label: 'MCP', description: vt('am.ui.catMcpDesc') },
+                { category: 'hook', label: 'Hook', description: vt('am.ui.catHookDesc'), unavailableReason: vt('am.ui.catHookUnavailable') },
+                { category: 'plugin', label: 'Plugin', description: vt('am.ui.catPluginDesc'), unavailableReason: tool === 'opencode' ? vt('am.ui.catPluginUnavailableOpenCode') : vt('am.ui.catPluginUnavailableIcode') },
               ],
               startup: {
                 cwd: current.icode.workspace ?? '',
                 terminals: current.terminals ?? [], selectedTerminal: current.selectedTerminal,
-                launchLabel: `启动 ${names[tool]}`,
-                hint: current.terminalError ?? `新建会话使用 ${current.terminalName}；项目和需求入口共用此本机偏好。`,
-                disabledReason: current.workspaceError ?? current.terminalError ?? (found.installed ? undefined : tool === 'opencode' && current.opencode.unsupportedReason ? current.opencode.unsupportedReason : '当前设备尚未发现此工具。'),
-                async chooseDirectory(cwd) {return new Promise(resolve=>{let value=cwd??'';Modal.confirm({title:'项目工作目录',content:<Input defaultValue={value} onChange={event=>{value=event.target.value;}} placeholder="输入本机 Git 仓库绝对路径"/>,onOk(){resolve({cancelled:false,cwd:value});},onCancel(){resolve({cancelled:true});}});});},
+                launchLabel: vt('am.ui.launchLabel', { tool: names[tool] }),
+                hint: current.terminalError ?? vt('am.ui.launchHint', { terminal: current.terminalName ?? '' }),
+                disabledReason: serverText(current.workspaceError) ?? current.terminalError ?? (found.installed ? undefined : tool === 'opencode' && current.opencode.unsupportedReason ? current.opencode.unsupportedReason : vt('am.ui.toolMissing')),
+                async chooseDirectory(cwd) {return new Promise(resolve=>{let value=cwd??'';Modal.confirm({title:vt('am.ui.workdirTitle'),content:<Input defaultValue={value} onChange={event=>{value=event.target.value;}} placeholder={vt('am.ui.workdirPlaceholder')}/>,onOk(){resolve({cancelled:false,cwd:value});},onCancel(){resolve({cancelled:true});}});});},
                 async selectTerminal(terminal) { await native(latest.current.role, 'terminal', { terminal }); statusPromise = undefined; },
                 async launch(input) {
-                  if (input.cwd !== (await status()).icode.workspace) throw new Error('工作目录与已保存配置不一致，请保存后重新启动');
+                  if (input.cwd !== (await status()).icode.workspace) throw new Error(vt('am.ui.cwdMismatch'));
                   const receipt = await native(latest.current.role, 'launch', { tool, restore: false, requestId: crypto.randomUUID(), terminal: input.terminal });
-                  return { message: receipt.note ?? '已请求本机终端启动。' };
+                  return { message: receipt.note ?? vt('am.ui.launchRequested') };
                 },
               },
               mountConfiguration(element, child) {
                 return mountConfigurationEditor(element, child, port, target => unavailableConfiguration(target, tool));
               },
               mountMaintenance(element) {
-                return mountReact(element, () => tool === 'icode' ? <div className="agent-maintenance-detail"><Space><strong>iCode · 本机实例</strong><Origin kind="native" /></Space>{controls.current}<Alert type="info" title="安装与版本维护" description="原 Teams 提供安装、升级及核对流程。此处使用已配置的 iCode，不执行安装升级或修改默认命令。" /></div> : <OpenCodeDetails status={current} />);
+                return mountReact(element, () => tool === 'icode' ? <div className="agent-maintenance-detail"><Space><strong>{vt('am.ui.icodeInstance')}</strong><Origin kind="native" /></Space>{controls.current}<Alert type="info" title={vt('am.ui.installMaintenance')} description={vt('am.ui.installMaintenanceNote')} /></div> : <OpenCodeDetails status={current} />);
               },
             }];
           },
           mountAdoption(element) {
-            return mountReact(element, () => <div className="agent-maintenance-detail"><Space><strong>{names[tool]} 接入</strong><Origin kind="simulated" /></Space><Alert type="info" title="本机状态按实际探测呈现" description={tool === 'icode' ? '使用已配置的 iCode 实例，状态以本机探测为准。' : 'OpenCode 保留原生 HTTP、Agent / Model / Variant、权限问答及 Plugin 语义。尚未接入原生 HTTP 服务；配置菜单可浏览只读配置。'} /><p className="ui-note">Teams 管理工具和共享入口；原生工具负责执行；Talents 提供知识整合、分析和能力改进。</p></div>);
+            return mountReact(element, () => <div className="agent-maintenance-detail"><Space><strong>{vt('am.ui.toolAdoption', { tool: names[tool] })}</strong><Origin kind="simulated" /></Space><Alert type="info" title={vt('am.ui.localStateTitle')} description={tool === 'icode' ? vt('am.ui.icodeAdoptionNote') : vt('am.ui.opencodeAdoptionNote')} /><p className="ui-note">{vt('am.ui.adoptionNote')}</p></div>);
           },
           dispose() {},
         };
       } };
     };
-    const dispose = mount(container, context, { loadModule, configurationOwnerLabel: '本机配置由原生工具管理' });
+    const dispose = mount(container, context, { loadModule, configurationOwnerLabel: vt('am.ui.configOwnerLabel') });
     return () => { abort.abort(); dispose(); };
-  }, []);
-  return <div className="agent-management-demo"><div ref={node} />{panels.map((panel, index) => createPortal(
+  }, [locale]);
+  return <div className="agent-management-demo"><div key={locale} ref={node} />{panels.map((panel, index) => createPortal(
     <Context.Provider value={{ ...demo, showText(title, content) {
       // The host drawer lives outside this native dialog's top layer.
       panel.element.closest('dialog')?.close();
       demo.showText(title, content);
     } }}>{panel.content()}</Context.Provider>, panel.element, String(index),
-  ))}<p className="agent-demo-source">本机状态来自实际探测；配置来自项目定义和 Skill 素材。共享范围与版本在共享能力中管理。</p></div>;
+  ))}<p className="agent-demo-source">{vt('am.ui.demoSource')}</p></div>;
 }

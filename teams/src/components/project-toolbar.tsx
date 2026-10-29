@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react';
 import { Tabs } from 'antd';
+import { useT } from '../i18n.js';
 import '../project.css';
 
 export const projectPages = [
-  { key: 'content', label: '项目概览' },
-  { key: 'management', label: '任务管理' },
-  { key: 'delivery', label: '任务交付' },
-];
+  { key: 'content', labelKey: 'pp.overview' },
+  { key: 'management', labelKey: 'pp.management' },
+  { key: 'delivery', labelKey: 'pp.delivery' },
+] as const;
 
 export function ProjectToolbar({ activeKey, onChange, actions }: { activeKey: string; onChange(value: string): void; actions: ReactNode }) {
-  return <div className="project-toolbar" role="region" aria-label="项目工具栏">
-    <Tabs aria-label="项目阶段" activeKey={activeKey} onChange={onChange} items={projectPages} />
+  const t = useT();
+  return <div className="project-toolbar" role="region" aria-label={t('pp.toolbarAria')}>
+    <Tabs aria-label={t('pp.phasesAria')} activeKey={activeKey} onChange={onChange} items={projectPages.map(page => ({ key: page.key, label: t(page.labelKey) }))} />
     <div className="project-toolbar-actions">{actions}</div>
   </div>;
 }

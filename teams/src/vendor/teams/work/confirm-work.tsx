@@ -6,7 +6,8 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Button } from 'antd';
 import type { ProjectWorkReceipt } from '../../../project-work.js';
-export function ConfirmWork({ title, instance, roleLabel, modelLabel, disabled, children, startWork, saved, busyChanged, confirmLabel = '开始工作', pendingLabel = '正在启动…' }: {
+import { vt } from '../i18n.js';
+export function ConfirmWork({ title, instance, roleLabel, modelLabel, disabled, children, startWork, saved, busyChanged, confirmLabel = vt('wl.startWork'), pendingLabel = vt('wl.launching') }: {
   title: string; instance: string; roleLabel?: string; modelLabel?: string; disabled: boolean; children?: ReactNode;
   startWork(requestId: string): Promise<ProjectWorkReceipt>; saved(receipt: ProjectWorkReceipt): void; busyChanged(busy: boolean): void;
   confirmLabel?: string; pendingLabel?: string;
@@ -19,8 +20,8 @@ export function ConfirmWork({ title, instance, roleLabel, modelLabel, disabled, 
     if (!attempted) original.current = startWork;
     pending.current = true; setBusy(true); busyChanged(true); setAttempted(true); setMessage('');
     try { saved(await original.current(requestId)); }
-    catch (cause) { setMessage(`启动结果待核对：${cause instanceof Error ? cause.message : String(cause)}。重试会保留同一启动请求。`); }
+    catch (cause) { setMessage(vt('wl.startPending', { error: cause instanceof Error ? cause.message : String(cause) })); }
     finally { pending.current = false; setBusy(false); busyChanged(false); }
   };
-  return <div className="page-stack"><p>将开始「{title}」工作，并带入当前业务范围和操作指引。</p><p className="muted">使用 {instance}，以及项目当前工作目录。角色：{roleLabel ?? '未配置'} · 模型：{modelLabel ?? '未配置'}</p><fieldset disabled={attempted} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>{children}</fieldset><Button type="primary" aria-label={attempted ? '重试原启动请求' : confirmLabel} disabled={disabled || busy} loading={busy} onClick={() => void start()}>{busy ? pendingLabel : attempted ? '重试原启动请求' : confirmLabel}</Button>{message && <p role="alert">{message}</p>}</div>;
+  return <div className="page-stack"><p>{vt('wl.confirmIntro', { title })}</p><p className="muted">{vt('wl.confirmScope', { instance, role: roleLabel ?? vt('wl.notConfigured'), model: modelLabel ?? vt('wl.notConfigured') })}</p><fieldset disabled={attempted} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>{children}</fieldset><Button type="primary" aria-label={attempted ? vt('wl.retryStart') : confirmLabel} disabled={disabled || busy} loading={busy} onClick={() => void start()}>{busy ? pendingLabel : attempted ? vt('wl.retryStart') : confirmLabel}</Button>{message && <p role="alert">{message}</p>}</div>;
 }

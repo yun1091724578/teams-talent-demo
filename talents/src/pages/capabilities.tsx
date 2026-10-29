@@ -6,6 +6,8 @@ import { Alert, App, Button, Collapse, Drawer, Select, Spin, Tag, Tooltip, Uploa
 import { CheckCircleFilled, ImportOutlined, InboxOutlined } from '@ant-design/icons';
 import { PageHeader } from '../vendor/teams/components/page-layout.tsx';
 import { useTalents } from '../store.tsx';
+import { useT } from '../i18n.tsx';
+import { currentT } from '../../../shared/i18n/index.ts';
 import { levelHash } from '../navigation.ts';
 import { CapIcon, CardGrid, Fields, InfoTip, ItemCard, Section } from '../components/ui.tsx';
 import type { Capability } from '../types.ts';
@@ -14,16 +16,17 @@ import { TaskForm } from './tasks.tsx';
 
 export function Capabilities() {
   const { state: st, go, toast } = useTalents();
+  const t = useT();
   const [creating, setCreating] = useState<string | null>(null), [opened, setOpened] = useState<string | null>(null), [importing, setImporting] = useState(false);
   const cap = opened ? st.capabilities.find(c => c.id === opened) : undefined;
   return <div className="page-stack">
-    <PageHeader title="知识能力"
-      actions={<Button icon={<ImportOutlined />} onClick={() => setImporting(true)}>导入能力</Button>} />
+    <PageHeader title={t('tnav.capabilities')}
+      actions={<Button icon={<ImportOutlined />} onClick={() => setImporting(true)}>{t('cap.import')}</Button>} />
     {st.categories.map(cat => <Section key={cat.id} title={cat.name} info={cat.desc}>
       <CardGrid>{st.capabilities.filter(c => c.cat === cat.id).map(c =>
         <ItemCard key={c.id} icon={<CapIcon cap={c} />} title={c.name} subtitle={c.desc} onClick={() => setOpened(c.id)} extra={<CapTags c={c} />}
-          actions={<Button size="small" onClick={() => setCreating(c.id)}>新建任务</Button>}>
-          <Fields rows={[['输入', c.inputLabel], ['产出', c.output]]} />
+          actions={<Button size="small" onClick={() => setCreating(c.id)}>{t('tk.newTask')}</Button>}>
+          <Fields rows={[[t('cap.input'), c.inputLabel], [t('cap.output'), c.output]]} />
         </ItemCard>)}</CardGrid>
     </Section>)}
     {cap && <CapabilityDetail cap={cap} onClose={() => setOpened(null)} onCreate={() => { setOpened(null); setCreating(cap.id); }} />}
@@ -31,28 +34,32 @@ export function Capabilities() {
     {creating && <TaskForm preset={{ cap: creating }} onClose={() => setCreating(null)} onCreated={(id, started, level) => {
       setCreating(null);
       go(levelHash(level, 'tasks', started ? { open: id } : {}));
-      if (!started) toast('已创建任务');
+      if (!started) toast(t('tk.created'));
     }} />}
   </div>;
 }
 
 /** 增量更新 when the capability declares an update (its rule in the tooltip); 已导入 for an imported one. */
-const CapTags = ({ c }: { c: Capability }) => <span className="tags">
-  {c.update && <Tooltip title={c.update}><Tag color="processing">增量更新</Tag></Tooltip>}{c.custom && <Tag>已导入</Tag>}</span>;
+const CapTags = ({ c }: { c: Capability }) => {
+  const t = useT();
+  return <span className="tags">
+    {c.update && <Tooltip title={c.update}><Tag color="processing">{t('cap.incremental')}</Tag></Tooltip>}{c.custom && <Tag>{t('cap.imported')}</Tag>}</span>;
+};
 
 // ---------- Definition ----------
 /** What engine.yaml declares: how the capability is built, updated and checked, and where it writes. */
 function Definition({ e, text, builtin }: { e: EngineDecl; text: string; builtin?: boolean }) {
+  const t = useT();
   const op = (o: EngineDecl['build'] | undefined) => o && <code className="cmd">{operationText(o)}</code>;
-  return <div className="field"><span className="label">能力定义</span>
+  return <div className="field"><span className="label">{t('cap.definition')}</span>
     <Fields rows={[
-      ['ID', <code>{e.id}</code>], ['版本', <>{e.definitionVersion ?? '—'}{builtin && <Tag className="inline-tag">内置</Tag>}</>],
-      ['执行方式', e.build.skill ? 'iCode Skill' : '命令'],
-      ['构建', op(e.build)], ['更新', e.update ? op(e.update) : '—'],
-      !!e.check && ['自检', op(e.check)],
-      ['产物目录', outputText(e)], !!e.applications?.length && ['应用入口', e.applications!.map(a => a.name + '（MCP：' + [a.command, ...(a.args ?? [])].join(' ') + '）').join('；')],
+      ['ID', <code>{e.id}</code>], [t('rv.version'), <>{e.definitionVersion ?? '—'}{builtin && <Tag className="inline-tag">{t('cap.builtin')}</Tag>}</>],
+      [t('cap.execution'), e.build.skill ? 'iCode Skill' : t('cap.command')],
+      [t('cap.build'), op(e.build)], [t('cap.update'), e.update ? op(e.update) : '—'],
+      !!e.check && [t('cap.check'), op(e.check)],
+      [t('cap.outputDir'), outputText(e)], !!e.applications?.length && [t('cap.apps'), e.applications!.map(a => a.name + '（MCP：' + [a.command, ...(a.args ?? [])].join(' ') + '）').join(t('common.listSeparator'))],
     ]} />
-    <Collapse size="small" items={[{ key: 'yaml', label: '查看 engine.yaml', children: <pre className="log yaml">{text}</pre> }]} />
+    <Collapse size="small" items={[{ key: 'yaml', label: t('cap.viewYaml'), children: <pre className="log yaml">{text}</pre> }]} />
   </div>;
 }
 
@@ -60,26 +67,27 @@ function Definition({ e, text, builtin }: { e: EngineDecl; text: string; builtin
 function CapabilityDetail({ cap, onClose, onCreate }: { cap: Capability; onClose(): void; onCreate(): void }) {
   const { state: st, update, toast } = useTalents();
   const { modal } = App.useApp();
+  const t = useT();
   const e = engineOf(cap), text = engineText(cap);
   const used = st.tasks.some(t => t.cap === cap.id) || st.artifacts.some(a => a.cap === cap.id);
-  const remove = () => modal.confirm({ title: '移除能力“' + cap.name + '”？', okText: '移除', okButtonProps: { danger: true }, cancelText: '取消',
-    content: '移除后，这个能力不再出现在知识能力中，也不能再新建任务。',
-    onOk: () => { update(d => { d.capabilities = d.capabilities.filter(c => c.id !== cap.id); }); onClose(); toast('已移除能力'); } });
+  const remove = () => modal.confirm({ title: t('cap.removeTitle', { name: cap.name }), okText: t('src.removeOk'), okButtonProps: { danger: true }, cancelText: t('common.cancel'),
+    content: t('cap.removeBody'),
+    onOk: () => { update(d => { d.capabilities = d.capabilities.filter(c => c.id !== cap.id); }); onClose(); toast(t('cap.removed')); } });
   return <Drawer open width={600} onClose={onClose} title={<div><div className="caption">{st.categories.find(c => c.id === cap.cat)?.name}</div><div className="title-row">{cap.name}<CapTags c={cap} /></div></div>}
     footer={<div className="drawer-foot">
-      {cap.custom && <Tooltip title={used ? '有任务或产物使用这个能力，先删除这些任务' : ''}><Button danger disabled={used} onClick={remove}>移除能力</Button></Tooltip>}
+      {cap.custom && <Tooltip title={used ? t('cap.inUse') : ''}><Button danger disabled={used} onClick={remove}>{t('cap.remove')}</Button></Tooltip>}
       <span className="spacer" />
-      <Button type="primary" onClick={onCreate}>新建任务</Button>
+      <Button type="primary" onClick={onCreate}>{t('tk.newTask')}</Button>
     </div>}>
     <div className="form-body">
       <p className="lead">{cap.desc}</p>
-      <div className="field"><span className="label">输入</span><p>{cap.detail.input}</p></div>
-      {cap.detail.abilities.length > 0 && <div className="field"><span className="label">核心能力</span>
+      <div className="field"><span className="label">{t('cap.input')}</span><p>{cap.detail.input}</p></div>
+      {cap.detail.abilities.length > 0 && <div className="field"><span className="label">{t('cap.coreAbilities')}</span>
         <div className="cap-abilities">{cap.detail.abilities.map(([name, text], i) => <div key={name} className="cap-ability">
           <span className="cap-ability-index">{i + 1}</span><div><b>{name}</b><div className="caption">{text}</div></div>
         </div>)}</div>
       </div>}
-      <div className="field"><span className="label">输出</span><p>{cap.detail.output}</p></div>
+      <div className="field"><span className="label">{t('cap.output')}</span><p>{cap.detail.output}</p></div>
       {e && text && <Definition e={e} text={text} builtin={!cap.custom} />}
     </div>
   </Drawer>;
@@ -92,25 +100,26 @@ interface Picked { name: string; files: string[]; text: string | null }
 function check(st: { capabilities: Capability[] }, p: Picked): { engine?: EngineDecl; error?: string; checks: string[] } {
   const checks: string[] = [];
   const odd = p.files.map(f => f.split('/')[0]).find(top => !['engine.yaml', 'README.md', 'scripts', 'skills', '.DS_Store'].includes(top));
-  if (odd) return { checks, error: '根目录只能包含 engine.yaml、README.md、scripts/ 和 skills/，发现了不支持的“' + odd + '”' };
-  if (p.text == null) return { checks, error: '定义包里没有 engine.yaml' };
-  checks.push('目录结构符合要求');
+  if (odd) return { checks, error: currentT('cap.errRootFiles', { name: odd }) };
+  if (p.text == null) return { checks, error: currentT('cap.errNoEngine') };
+  checks.push(currentT('cap.checkStructure'));
   const read = readEngine(p.text);
   if ('error' in read) return { checks, error: read.error };
-  checks.push('engine.yaml 有效');
+  checks.push(currentT('cap.checkEngine'));
   const e = read.engine;
   const refs = [e.build, e.update, e.install, e.uninstall, e.check].flatMap(o => (o?.args ?? []).filter(a => a.startsWith('${package.root}/')).map(a => a.slice('${package.root}/'.length)));
   const missing = p.files.length > 1 ? refs.find(r => !p.files.includes(r)) : undefined;
-  if (missing) return { checks, error: '声明引用的包内文件不存在：' + missing };
-  if (refs.length) checks.push('引用的包内文件存在');
-  if (st.capabilities.some(c => c.id === e.id)) return { checks, error: '已经有 ID 为“' + e.id + '”的能力，不能重复导入' };
-  checks.push('ID 可用');
-  if (!sourceKind(e)) return { checks, error: '演示只支持输入来源为代码仓（repositories）、文档集（documents）或会话（sessions）的能力' };
+  if (missing) return { checks, error: currentT('cap.errMissingRef', { path: missing }) };
+  if (refs.length) checks.push(currentT('cap.checkRefs'));
+  if (st.capabilities.some(c => c.id === e.id)) return { checks, error: currentT('cap.errDuplicateId', { id: e.id }) };
+  checks.push(currentT('cap.checkId'));
+  if (!sourceKind(e)) return { checks, error: currentT('cap.errSourceKind') };
   return { engine: e, checks };
 }
 
 function ImportCapability({ onClose, onImported }: { onClose(): void; onImported(id: string): void }) {
   const { state: st, update, toast } = useTalents();
+  const t = useT();
   const [picked, setPicked] = useState<Picked | null>(null), [checking, setChecking] = useState(false), [cat, setCat] = useState<string | null>(null);
   const result = useMemo(() => picked && !checking ? check(st, picked) : null, [picked, checking, st]), e = result?.engine;
   useEffect(() => { setCat(result?.engine ? guessCategory(result.engine) : null); }, [result]);
@@ -124,7 +133,7 @@ function ImportCapability({ onClose, onImported }: { onClose(): void; onImported
   const confirm = () => {
     const c = capabilityOf(e!, picked!.text!, cat!);
     update(d => { d.capabilities.push(c); });
-    toast('已导入能力“' + c.name + '”');
+    toast(t('cap.importedToast', { name: c.name }));
     onImported(c.id);
   };
   const batch = useRef<File[]>([]);
@@ -140,27 +149,27 @@ function ImportCapability({ onClose, onImported }: { onClose(): void; onImported
   if (!picked) body = <>
     <Upload.Dragger {...uploadProps(true)} className="import-drop">
       <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-      <p>选择或拖入定义包文件夹</p>
+      <p>{t('cap.dropFolder')}</p>
     </Upload.Dragger>
-    <div className="import-alt"><Upload {...uploadProps(false)}><Button size="small">选择 engine.yaml</Button></Upload>
-      <Button size="small" type="link" onClick={() => pick({ name: EXAMPLE.folder, files: EXAMPLE.files, text: EXAMPLE.text() })}>使用示例</Button></div>
+    <div className="import-alt"><Upload {...uploadProps(false)}><Button size="small">{t('cap.chooseYaml')}</Button></Upload>
+      <Button size="small" type="link" onClick={() => pick({ name: EXAMPLE.folder, files: EXAMPLE.files, text: EXAMPLE.text() })}>{t('cap.useExample')}</Button></div>
   </>;
   else body = <>
-    <div className="pick-summary"><span><b>{picked.name}</b> <span className="section-count">{picked.files.length} 个文件</span></span><Button size="small" onClick={() => setPicked(null)}>重新选择</Button></div>
+    <div className="pick-summary"><span><b>{picked.name}</b> <span className="section-count">{t('cap.fileCount', { count: picked.files.length })}</span></span><Button size="small" onClick={() => setPicked(null)}>{t('tk.reselect')}</Button></div>
     {checking ? <Spin size="small" /> : <>
       <ul className="check-list">{result!.checks.map(c => <li key={c}><CheckCircleFilled /> {c}</li>)}</ul>
       {result!.error && <Alert type="error" showIcon title={result!.error} />}
       {e && <>
         <div><h3 className="block-title">{e.name}</h3>{e.description && <p className="lead">{e.description}</p>}</div>
-        <div className="field"><span className="label">分类</span><Select value={cat} onChange={setCat} options={st.categories.map(c => ({ value: c.id, label: c.name }))} /></div>
+        <div className="field"><span className="label">{t('cap.category')}</span><Select value={cat} onChange={setCat} options={st.categories.map(c => ({ value: c.id, label: c.name }))} /></div>
         <Definition e={e} text={picked.text!} />
-        <Alert type="warning" showIcon title={<>只导入你信任的能力包 <InfoTip>构建和更新会执行包内脚本和声明的命令，进程以 Talents 服务的权限运行。</InfoTip></>} />
+        <Alert type="warning" showIcon title={<>{t('cap.trustWarning')} <InfoTip>{t('cap.trustTip')}</InfoTip></>} />
       </>}
     </>}
   </>;
-  return <Drawer open width={600} onClose={onClose} title={<>导入能力 <InfoTip>定义包根目录包含 engine.yaml，可选 README.md、scripts/、skills/。engine.yaml 声明输入、产物目录，以及构建、更新和自检的方式。</InfoTip></>}
+  return <Drawer open width={600} onClose={onClose} title={<>{t('cap.import')} <InfoTip>{t('cap.importTip')}</InfoTip></>}
     footer={<div className="drawer-foot"><span className="spacer" />
-      <Button onClick={onClose}>取消</Button><Button type="primary" disabled={!e || !cat} onClick={confirm}>导入</Button></div>}>
+      <Button onClick={onClose}>{t('common.cancel')}</Button><Button type="primary" disabled={!e || !cat} onClick={confirm}>{t('cap.doImport')}</Button></div>}>
     <div className="form-body">
       {body}
     </div>

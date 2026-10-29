@@ -3,7 +3,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { App } from 'antd';
 import { ApiError, resetState, saveState, submitPullRequest, teamsUpdate, type Boot, type SubmitRequest } from './api.ts';
 import { home, parseHash, type Route } from './navigation.ts';
+import { useLocale } from './i18n.tsx';
 import { project, taskName } from './demo/model.ts';
+import { localizeCapabilities, localizeCategories } from './demo/catalog-en.ts';
 import { finishRun, runProgress } from './demo/runs.ts';
 import type { Role, Source, TalentsState, TeamsInfo, TeamsPart } from './types.ts';
 
@@ -48,6 +50,7 @@ function routeOf(state: TalentsState, hash: string): Route {
 
 export function TalentsProvider({ boot, children }: { boot: Boot; children: ReactNode }) {
   const { message } = App.useApp();
+  const { locale } = useLocale();
   const [state, setState] = useState(boot.state), stateRef = useRef(boot.state);
   const [teams, setTeams] = useState(boot.teams), teamsRef = useRef(boot.teams);
   const [route, setRoute] = useState(() => routeOf(boot.state, location.hash));
@@ -163,11 +166,17 @@ export function TalentsProvider({ boot, children }: { boot: Boot; children: Reac
     const pid = projectId ?? focusProject ?? stateRef.current.projects[0]?.id ?? 'carddemo';
     const url = new URL('/teams', teams.origin);
     url.searchParams.set('demo-role', role === 'admin' ? 'owner' : 'member');
+    url.searchParams.set('lang', localStorage.getItem('demo-locale') === 'en' ? 'en' : 'zh');
     url.hash = '/projects?project=' + encodeURIComponent(pid) + '&tab=content';
     return url.toString();
   }, [focusProject, role, teams.origin]);
 
-  const value = useMemo<Talents>(() => ({ state, teams, route, role, focusProject, clock, update, reset, submit, go, replace, toast, teamsLink }),
-    [state, teams, route, role, focusProject, clock, update, reset, submit, go, replace, toast, teamsLink]);
+  // The capability catalog is product copy, not user data: show it in the UI language while the saved state stays Chinese.
+  const view = useMemo(() => locale === 'en'
+    ? { ...state, categories: localizeCategories(state.categories), capabilities: localizeCapabilities(state.capabilities) }
+    : state, [state, locale]);
+
+  const value = useMemo<Talents>(() => ({ state: view, teams, route, role, focusProject, clock, update, reset, submit, go, replace, toast, teamsLink }),
+    [view, teams, route, role, focusProject, clock, update, reset, submit, go, replace, toast, teamsLink]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, App, Button, Checkbox, Collapse, Drawer, Input, InputNumber, Modal, Progress, Radio, Segmented, Select, Space, Steps, Table, Tag } from 'antd';
 import { PlusOutlined, StarOutlined } from '@ant-design/icons';
 import { useTalents } from '../store.tsx';
+import { useT } from '../i18n.tsx';
+import { currentT } from '../../../shared/i18n/index.ts';
 import { levelHash } from '../navigation.ts';
 import type { Capability, Session, TalentsState, Task } from '../types.ts';
 import { artifact, basisOf, capability, changesSince, levelName, levelSessions, levelSources, member, memberName, project, session, source, task, taskName } from '../demo/model.ts';
@@ -15,44 +17,62 @@ import { isDiagnosis, pendingCount } from '../demo/suggestions.ts';
 import type { Toolbar } from './level.tsx';
 
 function ResultTag({ t }: { t: Task }) {
-  if (t.status === 'running') return <Tag color="processing">运行中</Tag>;
-  if (!t.lastRun) return <Tag>未运行</Tag>;
-  if (t.status === 'failed') return <Tag color="error">失败</Tag>;
-  if (t.status === 'cancelled') return <Tag>已取消</Tag>;
-  return <Tag color="success">成功</Tag>;
+  const tr = useT();
+  if (t.status === 'running') return <Tag color="processing">{tr('tk.running')}</Tag>;
+  if (!t.lastRun) return <Tag>{tr('tk.notRun')}</Tag>;
+  if (t.status === 'failed') return <Tag color="error">{tr('tk.failed')}</Tag>;
+  if (t.status === 'cancelled') return <Tag>{tr('tk.cancelled')}</Tag>;
+  return <Tag color="success">{tr('tk.succeeded')}</Tag>;
 }
-const StatusTags = ({ t }: { t: Task }) => <span className="tags"><ResultTag t={t} />{t.paused && t.status !== 'running' && <Tag color="warning">已暂停</Tag>}</span>;
+const StatusTags = ({ t }: { t: Task }) => {
+  const tr = useT();
+  return <span className="tags"><ResultTag t={t} />{t.paused && t.status !== 'running' && <Tag color="warning">{tr('tk.paused')}</Tag>}</span>;
+};
 function sourceText(st: TalentsState, t: Task) {
-  if (t.sessions) return t.sessions.length + ' 个团队会话';
-  const names = t.sources.map(id => source(st, id)?.name ?? '已移除的来源').join('、');
-  return t.prs ? names + '，' + t.prs.length + ' 个 PR' : names;
+  if (t.sessions) return currentT('tk.teamSessions', { count: t.sessions.length });
+  const names = t.sources.map(id => source(st, id)?.name ?? currentT('tk.removedSource')).join(currentT('common.listSeparator'));
+  return t.prs ? currentT('tk.withPrs', { names, count: t.prs.length }) : names;
 }
 function scheduleText(t: Task) {
   const s = t.schedule;
-  if (s.kind === 'daily') return (t.cap === 'traj' ? '每天 ' + s.time + ' 分析新共享的会话' : '每天 ' + s.time + (t.skipUnchanged ? '，来源没有变化时跳过' : '')) + (t.paused ? '（已暂停）' : '');
-  if (s.kind === 'once') return '定于 ' + s.at.replace('T', ' ');
-  return '立即执行';
+  if (s.kind === 'daily') {
+    const base = t.cap === 'traj' ? currentT('tk.dailyTraj', { time: s.time })
+      : t.skipUnchanged ? currentT('tk.dailySkip', { time: s.time }) : currentT('tk.daily', { time: s.time });
+    return t.paused ? currentT('tk.withPaused', { text: base }) : base;
+  }
+  if (s.kind === 'once') return currentT('tk.onceAt', { at: s.at.replace('T', ' ') });
+  return currentT('tk.now');
 }
 const isDaily = (t: Task) => t.schedule.kind === 'daily';
 /** A one-off task that has run (succeeded, failed or was cancelled) is done; a daily task never is. */
 const isDone = (t: Task) => t.status !== 'running' && !isDaily(t) && !!t.lastRun;
 function nextRun(t: Task) {
   if (t.status === 'running') return '';
-  if (t.schedule.kind === 'daily') return t.paused ? '已暂停，不会自动运行' : (now().slice(11) < t.schedule.time ? '今天 ' : '明天 ') + t.schedule.time;
+  if (t.schedule.kind === 'daily') return t.paused ? currentT('tk.pausedNoAuto') : currentT(now().slice(11) < t.schedule.time ? 'tk.today' : 'tk.tomorrow', { time: t.schedule.time });
   if (t.schedule.kind === 'once') return t.schedule.at.replace('T', ' ').slice(5);
   return '';
 }
 function modeText(st: TalentsState, t: Task) {
-  if (t.mode !== 'update') return '构建';
-  if (!t.input) return '更新现有知识';
-  return source(st, t.sources[0])?.type === 'docs' ? '更新，' + versionLabel(t.input.from) + ' → ' + versionLabel(t.input.to) : '更新，提交 ' + t.input.from + ' → ' + t.input.to;
+  if (t.mode !== 'update') return currentT('tk.build');
+  if (!t.input) return currentT('tk.updateExisting');
+  return source(st, t.sources[0])?.type === 'docs'
+    ? currentT('tk.updateDocs', { from: versionLabel(t.input.from), to: versionLabel(t.input.to) })
+    : currentT('tk.updateCommits', { from: t.input.from, to: t.input.to });
 }
-const lastRunText = (t: Task) => when(t.lastRun) + (t.status === 'cancelled' ? '，运行中被取消' : '') + (t.duration ? '，用时 ' + t.duration : '');
-const paramText = (v: string | number | boolean | string[]) => Array.isArray(v) ? v.join('、') : typeof v === 'boolean' ? (v ? '是' : '否') : String(v);
+const lastRunText = (t: Task) => {
+  const at = when(t.lastRun);
+  const cancelled = t.status === 'cancelled' ? currentT('tk.cancelledRun', { time: at }) : at;
+  return t.duration ? currentT('tk.withDuration', { time: cancelled, duration: t.duration }) : cancelled;
+};
+const paramText = (v: string | number | boolean | string[]) => Array.isArray(v) ? v.join(currentT('common.listSeparator')) : typeof v === 'boolean' ? (v ? currentT('tk.yes') : currentT('tk.no')) : String(v);
 function contextText(st: TalentsState, t: Task) {
   const c = t.context; if (!c) return null;
   const skills = c.skills.map(id => st.projects.flatMap(p => p.skills).find(s => s.id === id)?.name ?? id), docs = c.docs.map(id => source(st, id)?.name ?? id);
-  const parts = [skills.length && 'Skill：' + skills.join('、'), docs.length && '文档：' + docs.join('、'), c.note && '任务说明：' + c.note].filter(Boolean);
+  const parts = [
+    skills.length && currentT('tk.ctxSkills', { list: skills.join(currentT('common.listSeparator')) }),
+    docs.length && currentT('tk.ctxDocs', { list: docs.join(currentT('common.listSeparator')) }),
+    c.note && currentT('tk.ctxNote', { note: c.note }),
+  ].filter(Boolean);
   return parts.length ? parts.join('；') : null;
 }
 
@@ -60,30 +80,32 @@ function contextText(st: TalentsState, t: Task) {
 function useTaskActions() {
   const { state: st, update, toast } = useTalents();
   const { modal } = App.useApp();
-  const me = member(st, st.team.me)?.name ?? '管理员';
+  const tr = useT();
+  const me = member(st, st.team.me)?.name ?? tr('tk.admin');
   return {
-    run(id: string) { update(d => startRun(d, task(d, id)!)); toast('已开始运行'); },
+    run(id: string) { update(d => startRun(d, task(d, id)!)); toast(tr('tk.started')); },
     cancel(id: string) {
       const t = task(st, id)!;
-      modal.confirm({ title: '取消这次运行？', okText: '取消运行', okButtonProps: { danger: true }, cancelText: '继续运行',
-        content: '已经做完的步骤不会保留，产物不会改动。' + (isDaily(t) ? '定时任务之后照常按时运行。' : '一次性任务随之结束，移到“已完成”。'),
-        onOk: () => { update(d => { const x = task(d, id); if (x?.status === 'running') cancelRun(x, me); }); toast('已取消运行'); } });
+      modal.confirm({ title: tr('tk.cancelTitle'), okText: tr('tk.cancelOk'), okButtonProps: { danger: true }, cancelText: tr('tk.cancelKeep'),
+        content: isDaily(t) ? tr('tk.cancelBodyDaily') : tr('tk.cancelBodyOnce'),
+        onOk: () => { update(d => { const x = task(d, id); if (x?.status === 'running') cancelRun(x, me); }); toast(tr('tk.cancelledToast')); } });
     },
     pause(id: string, paused: boolean) {
       update(d => { task(d, id)!.paused = paused; });
-      toast(paused ? '已暂停，到点不再自动运行' : '已恢复，按设置的时间继续运行');
+      toast(paused ? tr('tk.pausedToast') : tr('tk.resumedToast'));
     },
     remove(id: string, onDone?: () => void) {
       const t = task(st, id)!;
-      modal.confirm({ title: '删除任务“' + taskName(st, t) + '”？', okText: '删除', okButtonProps: { danger: true }, cancelText: '取消',
-        content: t.lastRun ? '任务和它的运行记录一并删除' + (isDaily(t) ? '，之后不再定时运行' : '') + '。已经产出的知识不受影响。' : '任务还没有运行过，删除后不留记录。',
-        onOk: () => { update(d => { d.tasks = d.tasks.filter(x => x.id !== id); }); onDone?.(); toast('已删除任务'); } });
+      modal.confirm({ title: tr('tk.removeTitle', { name: taskName(st, t) }), okText: tr('tk.removeOk'), okButtonProps: { danger: true }, cancelText: tr('common.cancel'),
+        content: t.lastRun ? (isDaily(t) ? tr('tk.removeBodyWithRun') : tr('tk.removeBodyOneOff')) : tr('tk.removeNever'),
+        onOk: () => { update(d => { d.tasks = d.tasks.filter(x => x.id !== id); }); onDone?.(); toast(tr('tk.removed')); } });
     },
   };
 }
 
 export function LevelTasks({ pid, toolbar }: { pid: string | null; toolbar: Toolbar }) {
   const { state: st, route, replace, go, toast, clock } = useTalents();
+  const t = useT();
   const actions = useTaskActions();
   const [tab, setTab] = useState<'current' | 'done'>('current'), [cat, setCat] = useState('all');
   const [form, setForm] = useState<Preset | null>(null), [detail, setDetail] = useState<string | null>(null);
@@ -101,79 +123,85 @@ export function LevelTasks({ pid, toolbar }: { pid: string | null; toolbar: Tool
   const daily = tasks.filter(t => isDaily(t)).sort(byActivity), oneOff = tasks.filter(t => !isDaily(t) && !isDone(t)).sort(byActivity);
   const done = tasks.filter(isDone).sort((a, b) => (a.lastRun ?? '') < (b.lastRun ?? '') ? 1 : -1);
   const doneCount = mine.filter(isDone).length;
-  const produced = (t: Task) => {
-    const a = artifact(st, t.produced ?? t.artifact);
-    return a && ['产出', <><a onClick={e => { e.stopPropagation(); go(levelHash(pid, 'review', { id: a.id })); }}>{a.name}</a>（{isDiagnosis(a) ? (pendingCount(a) ? pendingCount(a) + ' 条建议待提交' : '建议已处理') : a.draft ? '待审阅' : '已生成 v' + a.published!.version}）</>] as [string, ReactNode];
+  const produced = (row: Task) => {
+    const a = artifact(st, row.produced ?? row.artifact);
+    const state = a && (isDiagnosis(a) ? (pendingCount(a) ? t('rv.suggestionsPending', { count: pendingCount(a) }) : t('ui.suggestionsHandled')) : a.draft ? t('ui.draft') : t('tk.publishedVersion', { version: a.published!.version }));
+    return a && [t('tk.produced'), <><a onClick={e => { e.stopPropagation(); go(levelHash(pid, 'review', { id: a.id })); }}>{a.name}</a>（{state}）</>] as [string, ReactNode];
   };
-  const card = (t: Task) => {
-    const cap = capability(st, t.cap), running = t.status === 'running', p = running ? runProgress(t, clock) : null;
-    const buttons = running ? <Button size="small" danger onClick={() => actions.cancel(t.id)}>取消运行</Button>
-      : isDaily(t) ? <><PauseButton t={t} size="small" onClick={() => actions.pause(t.id, !t.paused)} /><Button size="small" onClick={() => run(t.id)}>立即运行一次</Button></>
-      : isDone(t) ? <Button size="small" onClick={() => setForm({ copy: t.id })}>复制为新任务</Button>
-      : <Button size="small" onClick={() => run(t.id)}>立即运行</Button>;
-    return <ItemCard key={t.id} icon={<CapIcon cap={cap} />} title={taskName(st, t)} extra={<StatusTags t={t} />} onClick={() => setDetail(t.id)} actions={buttons}
-      className={t.paused && !running ? 'is-paused' : undefined}>
-      <Fields rows={isDone(t)
-        ? [['来源', sourceText(st, t)], ['运行于', lastRunText(t)], produced(t)]
-        : [['来源', sourceText(st, t)], ['时间', scheduleText(t)], !running && !!nextRun(t) && ['下次运行', nextRun(t)], !running && !!t.lastRun && ['最近运行', lastRunText(t)], !running && !!t.lastRun && produced(t)]} />
-      {p && <><Progress percent={p.pct} showInfo={false} size="small" /><p className="caption run-step"><span>{t.run!.plan.steps[p.step]}…</span><span>{p.step + 1}/{t.run!.plan.steps.length}</span></p></>}
+  const card = (row: Task) => {
+    const cap = capability(st, row.cap), running = row.status === 'running', p = running ? runProgress(row, clock) : null;
+    const buttons = running ? <Button size="small" danger onClick={() => actions.cancel(row.id)}>{t('tk.cancelRun')}</Button>
+      : isDaily(row) ? <><PauseButton t={row} size="small" onClick={() => actions.pause(row.id, !row.paused)} /><Button size="small" onClick={() => run(row.id)}>{t('tk.runDailyOnce')}</Button></>
+      : isDone(row) ? <Button size="small" onClick={() => setForm({ copy: row.id })}>{t('tk.copyTask')}</Button>
+      : <Button size="small" onClick={() => run(row.id)}>{t('tk.runNow')}</Button>;
+    return <ItemCard key={row.id} icon={<CapIcon cap={cap} />} title={taskName(st, row)} extra={<StatusTags t={row} />} onClick={() => setDetail(row.id)} actions={buttons}
+      className={row.paused && !running ? 'is-paused' : undefined}>
+      <Fields rows={isDone(row)
+        ? [[t('tk.source'), sourceText(st, row)], [t('tk.ranAt'), lastRunText(row)], produced(row)]
+        : [[t('tk.source'), sourceText(st, row)], [t('tk.time'), scheduleText(row)], !running && !!nextRun(row) && [t('tk.nextRun'), nextRun(row)], !running && !!row.lastRun && [t('tk.lastRun'), lastRunText(row)], !running && !!row.lastRun && produced(row)]} />
+      {p && <><Progress percent={p.pct} showInfo={false} size="small" /><p className="caption run-step"><span>{row.run!.plan.steps[p.step]}…</span><span>{p.step + 1}/{row.run!.plan.steps.length}</span></p></>}
     </ItemCard>;
   };
   return <>
-    {toolbar(<Button type="primary" icon={<PlusOutlined />} onClick={() => setForm({})}>新建任务</Button>)}
+    {toolbar(<Button type="primary" icon={<PlusOutlined />} onClick={() => setForm({})}>{t('tk.newTask')}</Button>)}
     <div className="toolbar">
-      <Segmented value={tab} onChange={v => setTab(v as typeof tab)} options={[{ value: 'current', label: '当前任务（' + (mine.length - doneCount) + '）' }, { value: 'done', label: '已完成（' + doneCount + '）' }]} />
+      <Segmented value={tab} onChange={v => setTab(v as typeof tab)} options={[{ value: 'current', label: t('tk.tabCurrent', { count: mine.length - doneCount }) }, { value: 'done', label: t('tk.tabDone', { count: doneCount }) }]} />
       <span className="spacer" />
-      <Segmented value={cat} onChange={v => setCat(v as string)} options={[{ value: 'all', label: '全部能力' }, ...st.categories.map(c => ({ value: c.id, label: c.name }))]} />
+      <Segmented value={cat} onChange={v => setCat(v as string)} options={[{ value: 'all', label: t('tk.allCaps') }, ...st.categories.map(c => ({ value: c.id, label: c.name }))]} />
     </div>
     {tab === 'current'
       ? daily.length || oneOff.length ? <>
-        {daily.length > 0 && <Section title="定时任务" note={daily.length}><CardGrid>{daily.map(card)}</CardGrid></Section>}
-        {oneOff.length > 0 && <Section title="一次性任务" note={oneOff.length}><CardGrid>{oneOff.map(card)}</CardGrid></Section>}
-      </> : <EmptyState>没有当前任务</EmptyState>
-      : done.length ? <CardGrid>{done.map(card)}</CardGrid> : <EmptyState>没有已完成的任务</EmptyState>}
+        {daily.length > 0 && <Section title={t('tk.dailyTasks')} note={daily.length}><CardGrid>{daily.map(card)}</CardGrid></Section>}
+        {oneOff.length > 0 && <Section title={t('tk.oneOffTasks')} note={oneOff.length}><CardGrid>{oneOff.map(card)}</CardGrid></Section>}
+      </> : <EmptyState>{t('tk.emptyCurrent')}</EmptyState>
+      : done.length ? <CardGrid>{done.map(card)}</CardGrid> : <EmptyState>{t('tk.emptyDone')}</EmptyState>}
     {detail && task(st, detail) && <TaskDetail id={detail} onClose={() => setDetail(null)} onRun={() => run(detail)} onCopy={() => { setDetail(null); setForm({ copy: detail }); }} />}
-    {form && <TaskForm level={pid} preset={form} onClose={() => setForm(null)} onCreated={(id, started) => { setTab('current'); setForm(null); if (started) setDetail(id); else toast('已创建任务'); }} />}
+    {form && <TaskForm level={pid} preset={form} onClose={() => setForm(null)} onCreated={(id, started) => { setTab('current'); setForm(null); if (started) setDetail(id); else toast(t('tk.created')); }} />}
   </>;
 }
 
 // ---------- Detail ----------
 /** Pausing is shown in the warning colour (like other reversible destructive actions); resuming is ordinary. */
-const PauseButton = ({ t, size, onClick }: { t: Task; size?: 'small'; onClick(): void }) =>
-  t.paused ? <Button size={size} onClick={onClick}>恢复</Button> : <Button size={size} className="btn-warning" onClick={onClick}>暂停</Button>;
+const PauseButton = ({ t, size, onClick }: { t: Task; size?: 'small'; onClick(): void }) => {
+  const tr = useT();
+  return t.paused ? <Button size={size} onClick={onClick}>{tr('tk.resume')}</Button> : <Button size={size} className="btn-warning" onClick={onClick}>{tr('tk.pause')}</Button>;
+};
 
 function TaskDetail({ id, onClose, onRun, onCopy }: { id: string; onClose(): void; onRun(): void; onCopy(): void }) {
   const { state: st, go, clock } = useTalents();
   const actions = useTaskActions();
+  const tr = useT();
   const log = useRef<HTMLPreElement>(null);
   const t = task(st, id)!, cap = capability(st, t.cap), running = t.status === 'running';
   const p = running ? runProgress(t, clock) : null;
   const a = artifact(st, t.produced ?? t.artifact);
   useEffect(() => { if (log.current) log.current.scrollTop = log.current.scrollHeight; });
-  const outcome = a && (isDiagnosis(a) ? '诊断完成，' + (a.suggestions ?? []).length + ' 条优化建议，' + pendingCount(a) + ' 条待提交' : !a.draft ? (t.unchanged ? '来源没有变化，保持 v' + a.published!.version : (a.published!.auto ? '远端索引已更新 v' : '已生成 v') + a.published!.version)
-    : a.published ? '原产物的新版本，等待审阅后提交' : '新产物，等待审阅后提交');
+  const outcome = a && (isDiagnosis(a) ? tr('tk.outcomeDiagnosis', { suggestions: (a.suggestions ?? []).length, pending: pendingCount(a) })
+    : !a.draft ? (t.unchanged ? tr('tk.outcomeUnchanged', { version: a.published!.version })
+      : a.published!.auto ? tr('tk.outcomeAuto', { version: a.published!.version }) : tr('tk.outcomeVersion', { version: a.published!.version }))
+    : a.published ? tr('tk.outcomeUpdate') : tr('tk.outcomeNew'));
   return <Drawer open width={560} onClose={onClose} title={<div><div className="caption">{cap.name}</div>{taskName(st, t)}</div>}
-    footer={<div className="drawer-foot">{running ? <><span className="spacer" /><Button danger onClick={() => actions.cancel(t.id)}>取消运行</Button></> : <>
-      <Button danger onClick={() => actions.remove(t.id, onClose)}>删除</Button><span className="spacer" />
+    footer={<div className="drawer-foot">{running ? <><span className="spacer" /><Button danger onClick={() => actions.cancel(t.id)}>{tr('tk.cancelRun')}</Button></> : <>
+      <Button danger onClick={() => actions.remove(t.id, onClose)}>{tr('tk.delete')}</Button><span className="spacer" />
       {isDaily(t) && <PauseButton t={t} onClick={() => actions.pause(t.id, !t.paused)} />}
-      {isDone(t) ? <Button onClick={onCopy}>复制为新任务</Button> : <Button onClick={onRun}>{isDaily(t) ? '立即运行一次' : '立即运行'}</Button>}
-      {a?.draft && t.status !== 'cancelled' && <Button type="primary" onClick={() => { onClose(); go(levelHash(a.projectId, 'review', { id: a.id })); }}>{isDiagnosis(a) ? '查看建议' : '去审阅'}</Button>}</>}</div>}>
+      {isDone(t) ? <Button onClick={onCopy}>{tr('tk.copyTask')}</Button> : <Button onClick={onRun}>{isDaily(t) ? tr('tk.runDailyOnce') : tr('tk.runNow')}</Button>}
+      {a?.draft && t.status !== 'cancelled' && <Button type="primary" onClick={() => { onClose(); go(levelHash(a.projectId, 'review', { id: a.id })); }}>{isDiagnosis(a) ? tr('rv.viewSuggestions') : tr('tk.goReview')}</Button>}</>}</div>}>
     <div className="form-body">
-      {t.paused && !running && <Alert type="warning" showIcon title="任务已暂停：到点不会自动运行，仍可以手动运行一次。" />}
-      <Fields rows={[['能力', cap.name], ['来源', <>{sourceText(st, t)}{t.sessions && <Collapse ghost size="small" items={[{ key: 's', label: '查看会话', children: <ul className="file-lines">{t.sessions.map(sid => <li key={sid}>{session(st, sid)?.title ?? sid}</li>)}</ul> }]} />}</>],
-        !!contextText(st, t) && ['补充材料', contextText(st, t)],
-        !!t.prs && ['PR', t.prs.map(n => '#' + n).join('、')],
+      {t.paused && !running && <Alert type="warning" showIcon title={tr('tk.pausedAlert')} />}
+      <Fields rows={[[tr('tk.capability'), cap.name], [tr('tk.source'), <>{sourceText(st, t)}{t.sessions && <Collapse ghost size="small" items={[{ key: 's', label: tr('tk.viewSessions'), children: <ul className="file-lines">{t.sessions.map(sid => <li key={sid}>{session(st, sid)?.title ?? sid}</li>)}</ul> }]} />}</>],
+        !!contextText(st, t) && [tr('tk.context'), contextText(st, t)],
+        !!t.prs && ['PR', t.prs.map(n => '#' + n).join(tr('common.listSeparator'))],
         ...Object.entries(t.params ?? {}).filter(([, v]) => v !== '' && !(Array.isArray(v) && !v.length)).map(([k, v]) => [k, paramText(v)] as [string, string]),
-        !!cap.update && ['方式', modeText(st, t)], ['时间', scheduleText(t)], ['状态', <StatusTags t={t} />]]} />
+        !!cap.update && [tr('tk.mode'), modeText(st, t)], [tr('tk.time'), scheduleText(t)], [tr('tk.status'), <StatusTags t={t} />]]} />
       {p ? <>
-        <div className="field"><span className="label">进度 <span className="section-count">{p.pct}%</span></span><Progress percent={p.pct} showInfo={false} size="small" />
+        <div className="field"><span className="label">{tr('tk.progress')} <span className="section-count">{p.pct}%</span></span><Progress percent={p.pct} showInfo={false} size="small" />
           <Steps size="small" direction="vertical" current={p.step} items={t.run!.plan.steps.map(title => ({ title }))} /></div>
-        <div className="field"><span className="label">日志</span><pre className="log" ref={log}>{p.logs.join('\n')}</pre></div>
+        <div className="field"><span className="label">{tr('tk.log')}</span><pre className="log" ref={log}>{p.logs.join('\n')}</pre></div>
       </> : <>
-        {a && t.status !== 'cancelled' && <div className="produced"><div className="caption">本次产出</div><b>{a.name}</b><span>{outcome}</span></div>}
-        {t.status === 'success' && !a && cap.outputPath && <div className="produced"><div className="caption">本次产出</div><b className="path">{cap.outputPath}</b></div>}
-        <div className="field"><span className="label">最近一次运行</span><p>{t.lastRun ? lastRunText(t) : '尚未运行'}</p></div>
-        {t.lastRun && <Collapse size="small" items={[{ key: 'log', label: '日志', children: <pre className="log">{(t.lastLogs ?? runPlan(st, t).logs.filter(Boolean)).join('\n')}</pre> }]} />}
+        {a && t.status !== 'cancelled' && <div className="produced"><div className="caption">{tr('tk.producedThis')}</div><b>{a.name}</b><span>{outcome}</span></div>}
+        {t.status === 'success' && !a && cap.outputPath && <div className="produced"><div className="caption">{tr('tk.producedThis')}</div><b className="path">{cap.outputPath}</b></div>}
+        <div className="field"><span className="label">{tr('tk.lastRunField')}</span><p>{t.lastRun ? lastRunText(t) : tr('tk.neverRun')}</p></div>
+        {t.lastRun && <Collapse size="small" items={[{ key: 'log', label: tr('tk.log'), children: <pre className="log">{(t.lastLogs ?? runPlan(st, t).logs.filter(Boolean)).join('\n')}</pre> }]} />}
       </>}
     </div>
   </Drawer>;
@@ -182,13 +210,14 @@ function TaskDetail({ id, onClose, onRun, onCopy }: { id: string; onClose(): voi
 // ---------- Selection dialogs ----------
 function SessionPicker({ level, initial, onDone, onClose }: { level: string | null; initial: string[]; onDone(ids: string[]): void; onClose(): void }) {
   const { state: st } = useTalents();
+  const t = useT();
   const all = levelSessions(st, level);
   const [selected, setSelected] = useState(() => new Set(initial));
   const [q, setQ] = useState(''), [member, setMember] = useState('all'), [inProject, setInProject] = useState('all'), [prompt, setPrompt] = useState('');
   const [ai, setAi] = useState<{ ids: string[]; answer: string } | null>(null), [busy, setBusy] = useState(false);
   // Example requests follow the Teams data: a member who shared sessions, other than the person viewing.
   const sharer = st.team.members.filter(m => m.id !== st.team.admin && all.some(s => s.owner === m.id))[1];
-  const examples = ['对话轮次超过 50 的会话', '最近 7 天返现相关的会话', ...(sharer ? [sharer.name + '共享的会话'] : [])];
+  const examples = [t('tk.exSessions50'), t('tk.exSessionsCashback'), ...(sharer ? [t('tk.exSharedBy', { name: sharer.name })] : [])];
   const base = ai ? ai.ids.map(id => session(st, id)!).filter(Boolean) : all;
   const visible = base.filter(s => (member === 'all' || s.owner === member) && (inProject === 'all' || s.projectId === inProject) && (!q.trim() || s.title.toLowerCase().includes(q.trim().toLowerCase()) || s.id.includes(q.trim())));
   const ask = (text: string) => {
@@ -197,31 +226,31 @@ function SessionPicker({ level, initial, onDone, onClose }: { level: string | nu
     setTimeout(() => { setAi(askICode(st, text, all)); setBusy(false); }, 1400 + Math.random() * 800);
   };
   const toggle = (ids: string[], on: boolean) => setSelected(prev => { const next = new Set(prev); ids.forEach(id => on ? next.add(id) : next.delete(id)); return next; });
-  return <Modal open width={1000} title="选择会话" onCancel={onClose} className="picker-modal"
-    footer={<div className="drawer-foot"><span>已选 <b>{selected.size}</b></span><Button type="link" onClick={() => setSelected(new Set())}>清空</Button><span className="spacer" />
-      <Button onClick={onClose}>取消</Button><Button type="primary" disabled={!selected.size} onClick={() => { onDone(all.filter(s => selected.has(s.id)).map(s => s.id)); onClose(); }}>确定</Button></div>}>
+  return <Modal open width={1000} title={t('tk.pickSessions')} onCancel={onClose} className="picker-modal"
+    footer={<div className="drawer-foot"><span>{t('tk.selected')} <b>{selected.size}</b></span><Button type="link" onClick={() => setSelected(new Set())}>{t('tk.clear')}</Button><span className="spacer" />
+      <Button onClick={onClose}>{t('common.cancel')}</Button><Button type="primary" disabled={!selected.size} onClick={() => { onDone(all.filter(s => selected.has(s.id)).map(s => s.id)); onClose(); }}>{t('common.confirm')}</Button></div>}>
     <div className="form-body">
-      <div className="ai-box"><div className="ai-title"><StarOutlined /> 让 iCode 帮你筛选</div>
-        <Space.Compact style={{ width: '100%' }}><Input value={prompt} onChange={e => setPrompt(e.target.value)} onPressEnter={() => ask(prompt)} placeholder="用一句话描述要找的会话" /><Button type="primary" loading={busy} onClick={() => ask(prompt)}>{busy ? '筛选中' : '筛选'}</Button></Space.Compact>
+      <div className="ai-box"><div className="ai-title"><StarOutlined /> {t('tk.aiFilterTitle')}</div>
+        <Space.Compact style={{ width: '100%' }}><Input value={prompt} onChange={e => setPrompt(e.target.value)} onPressEnter={() => ask(prompt)} placeholder={t('tk.aiPlaceholder')} /><Button type="primary" loading={busy} onClick={() => ask(prompt)}>{busy ? t('tk.filtering') : t('tk.filter')}</Button></Space.Compact>
         <div className="ai-examples">{examples.map(x => <Button key={x} size="small" onClick={() => ask(x)}>{x}</Button>)}</div>
       </div>
-      {ai && !busy && <Alert type="info" className="ai-answer" title={<><b>iCode：</b>{ai.answer}</>} action={<Space>{ai.ids.length > 0 && <Button size="small" onClick={() => toggle(ai.ids, true)}>全部选中</Button>}<Button size="small" type="link" onClick={() => setAi(null)}>显示全部会话</Button></Space>} />}
+      {ai && !busy && <Alert type="info" className="ai-answer" title={<><b>{t('tk.aiLabel')}</b>{ai.answer}</>} action={<Space>{ai.ids.length > 0 && <Button size="small" onClick={() => toggle(ai.ids, true)}>{t('tk.selectAll')}</Button>}<Button size="small" type="link" onClick={() => setAi(null)}>{t('tk.showAllSessions')}</Button></Space>} />}
       <div className="picker-search">
-        {level === null && <Select style={{ width: 160 }} aria-label="项目" value={inProject} onChange={setInProject} options={[{ value: 'all', label: '全部项目' }, ...st.projects.map(p => ({ value: p.id, label: p.name }))]} />}
-        <Select showSearch optionFilterProp="label" style={{ width: 140 }} aria-label="成员" value={member} onChange={setMember} options={[{ value: 'all', label: '全部成员' }, ...st.team.members.map(m => ({ value: m.id, label: m.name }))]} />
-        <Input.Search allowClear value={q} onChange={e => setQ(e.target.value)} placeholder="搜索会话名称或 ID" />
+        {level === null && <Select style={{ width: 160 }} aria-label={t('tk.project')} value={inProject} onChange={setInProject} options={[{ value: 'all', label: t('tk.allProjects') }, ...st.projects.map(p => ({ value: p.id, label: p.name }))]} />}
+        <Select showSearch optionFilterProp="label" style={{ width: 140 }} aria-label={t('tk.member')} value={member} onChange={setMember} options={[{ value: 'all', label: t('tk.allMembers') }, ...st.team.members.map(m => ({ value: m.id, label: m.name }))]} />
+        <Input.Search allowClear value={q} onChange={e => setQ(e.target.value)} placeholder={t('tk.searchSessions')} />
       </div>
-      <Table<Session> size="small" rowKey="id" pagination={false} scroll={{ y: 360 }} dataSource={busy ? [] : visible} loading={busy && { tip: 'iCode 正在筛选会话…' }}
-        locale={{ emptyText: busy ? ' ' : '没有匹配的会话' }}
+      <Table<Session> size="small" rowKey="id" pagination={false} scroll={{ y: 360 }} dataSource={busy ? [] : visible} loading={busy && { tip: t('tk.filteringTip') }}
+        locale={{ emptyText: busy ? ' ' : t('tk.noMatchingSessions') }}
         rowSelection={{ selectedRowKeys: [...selected], onSelect: (s, on) => toggle([s.id], on), onSelectAll: on => toggle(visible.map(s => s.id), on) }}
         onRow={s => ({ onClick: () => toggle([s.id], !selected.has(s.id)), className: 'row-click' })}
         columns={[
-          { title: '名称', dataIndex: 'title' },
-          ...(level === null ? [{ title: '项目', width: 130, ellipsis: true, render: (_: unknown, s: Session) => project(st, s.projectId)?.name ?? s.projectId }] : []),
-          { title: '成员', width: 90, render: (_, s) => memberName(st, s.owner, s.ownerName) },
-          { title: '最后更新', width: 110, render: (_, s) => when(s.updated) },
-          { title: '对话轮次', dataIndex: 'turns', align: 'right', width: 90 },
-          { title: '消息', dataIndex: 'messages', align: 'right', width: 70 },
+          { title: t('tk.name'), dataIndex: 'title' },
+          ...(level === null ? [{ title: t('tk.project'), width: 130, ellipsis: true, render: (_: unknown, s: Session) => project(st, s.projectId)?.name ?? s.projectId }] : []),
+          { title: t('tk.member'), width: 90, render: (_, s) => memberName(st, s.owner, s.ownerName) },
+          { title: t('tk.lastUpdated'), width: 110, render: (_, s) => when(s.updated) },
+          { title: t('tk.turns'), dataIndex: 'turns', align: 'right', width: 90 },
+          { title: t('tk.messages'), dataIndex: 'messages', align: 'right', width: 70 },
           { title: 'Token', align: 'right', width: 90, render: (_, s) => tokens(s.tokens) },
         ]} />
     </div>
@@ -230,16 +259,17 @@ function SessionPicker({ level, initial, onDone, onClose }: { level: string | nu
 
 function PrPicker({ repoId, initial, onDone, onClose }: { repoId: string; initial: number[]; onDone(list: number[]): void; onClose(): void }) {
   const { state: st } = useTalents();
+  const t = useT();
   const [selected, setSelected] = useState(() => new Set(initial)), [q, setQ] = useState('');
   const s = q.trim().toLowerCase().replace(/^#/, '');
   const list = (st.prs[repoId] ?? []).slice().reverse().filter(p => !s || String(p.number).startsWith(s) || p.title.toLowerCase().includes(s));
   const toggle = (n: number) => setSelected(prev => { const next = new Set(prev); if (next.has(n)) next.delete(n); else next.add(n); return next; });
-  return <Modal open title="选择 PR" onCancel={onClose}
-    footer={<div className="drawer-foot"><span>已选 <b>{selected.size}</b></span><span className="spacer" /><Button onClick={onClose}>取消</Button>
-      <Button type="primary" disabled={!selected.size} onClick={() => { onDone([...selected].sort((a, b) => a - b)); onClose(); }}>确定</Button></div>}>
+  return <Modal open title={t('tk.pickPrs')} onCancel={onClose}
+    footer={<div className="drawer-foot"><span>{t('tk.selected')} <b>{selected.size}</b></span><span className="spacer" /><Button onClick={onClose}>{t('common.cancel')}</Button>
+      <Button type="primary" disabled={!selected.size} onClick={() => { onDone([...selected].sort((a, b) => a - b)); onClose(); }}>{t('common.confirm')}</Button></div>}>
     <div className="form-body">
-      <Input.Search allowClear value={q} onChange={e => setQ(e.target.value)} placeholder="按编号或标题搜索" />
-      <Table size="small" rowKey="number" pagination={false} showHeader={false} scroll={{ y: 'min(420px, 55vh)' }} dataSource={list} locale={{ emptyText: '没有匹配的 PR' }}
+      <Input.Search allowClear value={q} onChange={e => setQ(e.target.value)} placeholder={t('tk.searchPrs')} />
+      <Table size="small" rowKey="number" pagination={false} showHeader={false} scroll={{ y: 'min(420px, 55vh)' }} dataSource={list} locale={{ emptyText: t('tk.noMatchingPrs') }}
         rowSelection={{ selectedRowKeys: [...selected], onSelect: p => toggle(p.number), hideSelectAll: true }}
         onRow={p => ({ onClick: () => toggle(p.number), className: 'row-click' })}
         columns={[{ render: (_, p) => <b>#{p.number}</b>, width: 60 }, { dataIndex: 'title' }, { dataIndex: 'merged', width: 100, className: 'caption' }]} />
@@ -253,6 +283,7 @@ interface Preset { cap?: string; source?: string; from?: string; copy?: string }
 /** level: the team (null) or project the task belongs to; undefined lets the user choose (from 知识能力). */
 export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?: string | null; preset: Preset; onClose(): void; onCreated(id: string, started: boolean, level: string | null): void }) {
   const { state: st, update, focusProject } = useTalents();
+  const t = useT();
   // "重新提取" on an artifact: start from the task that built it.
   const fromArtifact = artifact(st, preset.from);
   const copied = task(st, preset.copy);
@@ -283,13 +314,13 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
     return basis ? { artifact: a!, changes: changesSince(source(st, src), basis) } : null;
   })();
 
-  let ok = !!src, hint = src ? '' : levelName(st, level) + '还没有' + (cap.input === 'docs' ? '文档集' : cap.input === 'repo+pr' ? '有 PR 记录的代码仓' : '代码仓');
-  if (modeInfo && mode === 'update' && schedule !== 'daily' && modeInfo.changes && !modeInfo.changes.count) { ok = false; hint = '来源没有变化，无需更新'; }
-  if (cap.input === 'sessions') { ok = sessions.length > 0; hint = ok ? '' : '请选择会话'; }
-  if (cap.input === 'repo+pr' && src) { ok = prs.length > 0; hint = ok ? '' : '请选择 PR'; }
-  if (cap.input === 'repo+snippet' && src) { ok = !!scenario.trim() && !!snippets.trim(); hint = ok ? '' : '请填写场景和代码片段'; }
+  let ok = !!src, hint = src ? '' : t('tk.noLevelSource', { level: levelName(st, level), kind: cap.input === 'docs' ? t('lv.docs') : cap.input === 'repo+pr' ? t('tk.repoWithPrs') : t('lv.repo') });
+  if (modeInfo && mode === 'update' && schedule !== 'daily' && modeInfo.changes && !modeInfo.changes.count) { ok = false; hint = t('tk.noChanges'); }
+  if (cap.input === 'sessions') { ok = sessions.length > 0; hint = ok ? '' : t('tk.selectSessions'); }
+  if (cap.input === 'repo+pr' && src) { ok = prs.length > 0; hint = ok ? '' : t('tk.selectPrs'); }
+  if (cap.input === 'repo+snippet' && src) { ok = !!scenario.trim() && !!snippets.trim(); hint = ok ? '' : t('tk.fillSnippet'); }
   const missing = (cap.params ?? []).find(p => p.required && p.type !== 'boolean' && !String(values[p.name] ?? '').trim());
-  if (ok && missing) { ok = false; hint = '请填写 ' + missing.name; }
+  if (ok && missing) { ok = false; hint = t('tk.fillParam', { name: missing.name }); }
   // Supporting material for a diagnosis: the level's project skills and document sets.
   const levelSkills = (level ? st.projects.filter(p => p.id === level) : st.projects).flatMap(p => p.skills);
 
@@ -297,73 +328,74 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
   const changeLevel = (id: string | null) => { setLevel(id); setChosen(null); setPrs([]); setSessions([]); setCtxSkills([]); setCtxDocs([]); };
   const submit = () => {
     const id = uid('t');
-    const t: Task = {
+    const next: Task = {
       id, projectId: level, name: name.trim(), cap: capId, sources: [src!], created: now(), status: 'idle',
       mode: modeInfo ? mode : 'build', prompt: cap.skill ? prompt : undefined,
       schedule: schedule === 'daily' ? { kind: 'daily', time: time || '02:00' } : schedule === 'once' ? { kind: 'once', at } : { kind: 'now' },
     };
-    if (cap.input === 'sessions') t.sessions = sessions.slice();
-    if (cap.input === 'repo+pr') t.prs = prs.slice();
-    if (cap.params?.length) t.params = Object.fromEntries(cap.params.map(p => [p.name, p.type === 'array' ? String(values[p.name] ?? '').split('\n').map(x => x.trim()).filter(Boolean) : values[p.name] ?? (p.type === 'boolean' ? false : '')]));
-    if (cap.input === 'sessions' && (ctxSkills.length || ctxDocs.length || ctxNote.trim())) t.context = { skills: ctxSkills, docs: ctxDocs, note: ctxNote.trim() || undefined };
-    if (t.schedule.kind === 'daily' && cap.input !== 'sessions') t.skipUnchanged = skip;
-    update(d => { d.tasks.unshift(t); if (schedule === 'now') startRun(d, d.tasks[0]); });
+    if (cap.input === 'sessions') next.sessions = sessions.slice();
+    if (cap.input === 'repo+pr') next.prs = prs.slice();
+    if (cap.params?.length) next.params = Object.fromEntries(cap.params.map(p => [p.name, p.type === 'array' ? String(values[p.name] ?? '').split('\n').map(x => x.trim()).filter(Boolean) : values[p.name] ?? (p.type === 'boolean' ? false : '')]));
+    if (cap.input === 'sessions' && (ctxSkills.length || ctxDocs.length || ctxNote.trim())) next.context = { skills: ctxSkills, docs: ctxDocs, note: ctxNote.trim() || undefined };
+    if (next.schedule.kind === 'daily' && cap.input !== 'sessions') next.skipUnchanged = skip;
+    update(d => { d.tasks.unshift(next); if (schedule === 'now') startRun(d, d.tasks[0]); });
     onCreated(id, schedule === 'now', level);
   };
   const pickRow = (text: string, label: string, empty: boolean, onPick: () => void) =>
     <div className={'pick-summary' + (empty ? ' empty' : '')}><span>{text}</span><Button size="small" onClick={onPick}>{label}</Button></div>;
   const changeNote = modeInfo && (() => {
-    const c = modeInfo.changes, s = source(st, src)!, docs = s.type === 'docs', verb = docs ? '提取' : '构建', what = docs ? '文档' : '代码';
-    return c && c.count ? '上次' + verb + '后' + what + '有变化：' + (docs ? versionLabel(c.from) + ' → ' + versionLabel(c.to) + '，' : '') + c.text : '上次' + verb + '后' + what + '没有变化';
+    const c = modeInfo.changes, docs = source(st, src)!.type === 'docs';
+    const detail = c && c.count ? (docs ? versionLabel(c.from) + ' → ' + versionLabel(c.to) + '，' : '') + c.text : '';
+    return c && c.count ? t(docs ? 'tk.changeDocsYes' : 'tk.changeCodeYes', { detail }) : t(docs ? 'tk.changeDocsNo' : 'tk.changeCodeNo');
   })();
 
-  return <Drawer open width={560} title={fixed === undefined ? '新建任务' : <div><div className="caption">{levelName(st, level)}</div>{copied ? '复制为新任务' : '新建任务'}</div>} onClose={onClose}
-    footer={<div className="drawer-foot"><span className="ui-note">{hint}</span><span className="spacer" /><Button onClick={onClose}>取消</Button><Button type="primary" disabled={!ok} onClick={submit}>{schedule === 'now' ? '创建并运行' : '创建'}</Button></div>}>
+  return <Drawer open width={560} title={fixed === undefined ? t('tk.newTask') : <div><div className="caption">{levelName(st, level)}</div>{copied ? t('tk.copyTask') : t('tk.newTask')}</div>} onClose={onClose}
+    footer={<div className="drawer-foot"><span className="ui-note">{hint}</span><span className="spacer" /><Button onClick={onClose}>{t('common.cancel')}</Button><Button type="primary" disabled={!ok} onClick={submit}>{schedule === 'now' ? t('tk.createAndRun') : t('tk.create')}</Button></div>}>
     <div className="form-body">
-      {fixed === undefined && <div className="field"><span className="label">所属 <InfoTip>任务只能使用所属层级的来源，产出的知识也归属这一层级。</InfoTip></span>
-        <Select value={level ?? ''} onChange={v => changeLevel(v || null)} options={[{ value: '', label: '团队' }, ...st.projects.map(p => ({ value: p.id, label: p.name }))]} />
+      {fixed === undefined && <div className="field"><span className="label">{t('tk.belongsTo')} <InfoTip>{t('tk.belongsToTip')}</InfoTip></span>
+        <Select value={level ?? ''} onChange={v => changeLevel(v || null)} options={[{ value: '', label: t('tnav.team') }, ...st.projects.map(p => ({ value: p.id, label: p.name }))]} />
 </div>}
-      <div className="field"><span className="label">能力 <InfoTip>{cap.desc}</InfoTip></span>
+      <div className="field"><span className="label">{t('tk.capability')} <InfoTip>{cap.desc}</InfoTip></span>
         <Select value={capId} onChange={changeCap} options={st.categories.map(c => ({ label: c.name, title: c.name, options: st.capabilities.filter(x => x.cat === c.id).map(x => ({ value: x.id, label: x.name })) }))} />
 </div>
-      <div className="field"><span className="label">来源</span>
+      <div className="field"><span className="label">{t('tk.source')}</span>
         {cap.input === 'sessions'
-          ? pickRow(sessions.length ? '已选 ' + sessions.length + ' 个会话' : '还没有选择会话', sessions.length ? '重新选择' : '选择会话…', !sessions.length, () => setPicking('sessions'))
+          ? pickRow(sessions.length ? t('tk.selectedSessions', { count: sessions.length }) : t('tk.noSessions'), t(sessions.length ? 'tk.reselect' : 'tk.pickSessionsCta'), !sessions.length, () => setPicking('sessions'))
           : <div className="stack">
             <Select value={src ?? undefined} onChange={v => { setChosen(v); setPrs([]); }} options={pool.map(s => ({ value: s.id, label: s.name }))} />
-            {cap.input === 'repo+pr' && pickRow(prs.length ? '已选 ' + prs.length + ' 个 PR：' + prs.map(n => '#' + n).join('、') : '还没有选择 PR', prs.length ? '重新选择' : '选择 PR…', !prs.length, () => setPicking('prs'))}
-            {cap.input === 'repo+snippet' && <><Input value={scenario} onChange={e => setScenario(e.target.value)} placeholder="场景" />
-              <Input.TextArea rows={2} value={snippets} onChange={e => setSnippets(e.target.value)} placeholder="代码片段文件，每行一个路径" /></>}
+            {cap.input === 'repo+pr' && pickRow(prs.length ? t('tk.selectedPrs', { count: prs.length, list: prs.map(n => '#' + n).join(t('common.listSeparator')) }) : t('tk.noPrs'), t(prs.length ? 'tk.reselect' : 'tk.pickPrsCta'), !prs.length, () => setPicking('prs'))}
+            {cap.input === 'repo+snippet' && <><Input value={scenario} onChange={e => setScenario(e.target.value)} placeholder={t('tk.scenario')} />
+              <Input.TextArea rows={2} value={snippets} onChange={e => setSnippets(e.target.value)} placeholder={t('tk.snippets')} /></>}
           </div>}
       </div>
-      {cap.input === 'sessions' && <div className="field"><span className="label">补充材料 <InfoTip>可选。帮助深入诊断，形成更有针对性的建议；不提供时只依据会话轨迹。</InfoTip></span>
-        <Select mode="multiple" allowClear value={ctxSkills} onChange={setCtxSkills} placeholder={levelSkills.length ? '相关的 Skill' : '这个层级没有项目 Skill'} disabled={!levelSkills.length}
+      {cap.input === 'sessions' && <div className="field"><span className="label">{t('tk.context')} <InfoTip>{t('tk.contextTip')}</InfoTip></span>
+        <Select mode="multiple" allowClear value={ctxSkills} onChange={setCtxSkills} placeholder={t(levelSkills.length ? 'tk.ctxSkillsPlaceholder' : 'tk.noProjectSkills')} disabled={!levelSkills.length}
           options={levelSkills.map(s => ({ value: s.id, label: s.name }))} />
-        <Select mode="multiple" allowClear value={ctxDocs} onChange={setCtxDocs} placeholder="相关文档" options={own.filter(s => s.type === 'docs').map(s => ({ value: s.id, label: s.name }))} />
-        <Input.TextArea rows={2} value={ctxNote} onChange={e => setCtxNote(e.target.value)} placeholder="任务说明" /></div>}
-      {(cap.params ?? []).length > 0 && <div className="field"><span className="label">参数</span>
+        <Select mode="multiple" allowClear value={ctxDocs} onChange={setCtxDocs} placeholder={t('tk.ctxDocsPlaceholder')} options={own.filter(s => s.type === 'docs').map(s => ({ value: s.id, label: s.name }))} />
+        <Input.TextArea rows={2} value={ctxNote} onChange={e => setCtxNote(e.target.value)} placeholder={t('tk.ctxNotePlaceholder')} /></div>}
+      {(cap.params ?? []).length > 0 && <div className="field"><span className="label">{t('tk.params')}</span>
         {cap.params!.map(p => <label key={p.name} className="param-row"><span className="caption">{p.name}{p.required && <span className="required">*</span>}</span>
           {p.type === 'boolean' ? <Checkbox checked={!!values[p.name]} onChange={e => setValues(v => ({ ...v, [p.name]: e.target.checked }))} />
             : p.type === 'number' || p.type === 'integer' ? <InputNumber style={{ width: '100%' }} precision={p.type === 'integer' ? 0 : undefined} value={values[p.name] as number | undefined} onChange={x => setValues(v => ({ ...v, [p.name]: x ?? '' }))} />
-            : p.type === 'array' ? <Input.TextArea rows={2} value={String(values[p.name] ?? '')} onChange={e => setValues(v => ({ ...v, [p.name]: e.target.value }))} placeholder="每行一项" />
+            : p.type === 'array' ? <Input.TextArea rows={2} value={String(values[p.name] ?? '')} onChange={e => setValues(v => ({ ...v, [p.name]: e.target.value }))} placeholder={t('tk.onePerLine')} />
             : <Input value={String(values[p.name] ?? '')} onChange={e => setValues(v => ({ ...v, [p.name]: e.target.value }))} />}</label>)}
       </div>}
-      {modeInfo && <div className="field"><span className="label">方式</span>
+      {modeInfo && <div className="field"><span className="label">{t('tk.mode')}</span>
         <Radio.Group className="option-list" value={mode} onChange={e => setMode(e.target.value)}>
-          <Radio value="update"><b>更新现有知识</b><span className="caption">{changeNote}</span></Radio>
-          <Radio value="build"><b>重新构建</b></Radio>
+          <Radio value="update"><b>{t('tk.updateExisting')}</b><span className="caption">{changeNote}</span></Radio>
+          <Radio value="build"><b>{t('tk.rebuild')}</b></Radio>
         </Radio.Group></div>}
-      <div className="field"><span className="label">时间{schedule === 'daily' && cap.input === 'sessions' && <> <InfoTip>每天分析新共享的会话；首次运行分析上面选择的会话。</InfoTip></>}</span>
-        <Select value={schedule} onChange={setSchedule} options={[{ value: 'now', label: '立即执行' }, { value: 'once', label: '指定时间执行一次' }, { value: 'daily', label: '每天定时' }]} />
+      <div className="field"><span className="label">{t('tk.time')}{schedule === 'daily' && cap.input === 'sessions' && <> <InfoTip>{t('tk.dailySessionsTip')}</InfoTip></>}</span>
+        <Select value={schedule} onChange={setSchedule} options={[{ value: 'now', label: t('tk.now') }, { value: 'once', label: t('tk.once') }, { value: 'daily', label: t('tk.dailyOption') }]} />
         {schedule === 'once' && <Input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} />}
         {schedule === 'daily' && <Input type="time" value={time} onChange={e => setTime(e.target.value)} />}
-        {schedule === 'daily' && cap.input !== 'sessions' && <Checkbox checked={skip} onChange={e => setSkip(e.target.checked)}>来源没有变化时跳过</Checkbox>}
+        {schedule === 'daily' && cap.input !== 'sessions' && <Checkbox checked={skip} onChange={e => setSkip(e.target.checked)}>{t('tk.skipUnchanged')}</Checkbox>}
       </div>
-      <label className="field"><span className="label">名称</span>
+      <label className="field"><span className="label">{t('tk.name')}</span>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder={taskName(st, { cap: capId, sources: src ? [src] : [], sessions: cap.input === 'sessions' ? sessions : undefined })} /></label>
-      {cap.skill && <Collapse size="small" items={[{ key: 'adv', label: <>高级设置 <span className="caption">（当前智能体：{st.agents.find(a => a.id === agentId)?.name}）</span></>, children: <div className="form-body flush">
-        <div className="field"><span className="label">执行任务的智能体</span><Select value={agentId} onChange={setAgentId} options={st.agents.map(a => ({ value: a.id, label: a.name }))} /></div>
-        <div className="field"><span className="label">提示词</span><Input.TextArea rows={3} value={prompt} onChange={e => setPrompt(e.target.value)} /></div>
+      {cap.skill && <Collapse size="small" items={[{ key: 'adv', label: <>{t('tk.advanced')} <span className="caption">{t('tk.currentAgent', { name: st.agents.find(a => a.id === agentId)?.name ?? '' })}</span></>, children: <div className="form-body flush">
+        <div className="field"><span className="label">{t('tk.agent')}</span><Select value={agentId} onChange={setAgentId} options={st.agents.map(a => ({ value: a.id, label: a.name }))} /></div>
+        <div className="field"><span className="label">{t('tk.prompt')}</span><Input.TextArea rows={3} value={prompt} onChange={e => setPrompt(e.target.value)} /></div>
       </div> }]} />}
     </div>
     {picking === 'sessions' && <SessionPicker level={level} initial={sessions} onDone={setSessions} onClose={() => setPicking(null)} />}

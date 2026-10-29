@@ -1,19 +1,28 @@
 // Owner workspace: sources, knowledge tasks and artifacts.
 import type { PageDefinition } from './vendor/teams/page-registry.ts';
+import { currentT, type MessageKey } from '../../shared/i18n/index.ts';
 import type { Role } from './types.ts';
 
 export interface TalentsPage extends PageDefinition { role: Role }
+// Titles and tab labels are chrome: getters keep `page.title` working while reading the current locale.
+const pageTitleKeys: Record<string, MessageKey> = { team: 'tnav.team', projects: 'tnav.projects', capabilities: 'tnav.capabilities', overview: 'tnav.overview', account: 'tnav.account' };
+const withTitle = (page: Omit<TalentsPage, 'title'>): TalentsPage => Object.defineProperties({ ...page } as TalentsPage, {
+  title: { get: () => currentT(pageTitleKeys[page.id]), enumerable: true },
+});
 export const pages: TalentsPage[] = [
-  { id: 'team', route: 'team', title: '团队', role: 'admin', groupId: 'team', icon: 'members' },
-  { id: 'projects', route: 'projects', title: '项目', role: 'admin', groupId: 'team', icon: 'projects' },
-  { id: 'capabilities', route: 'capabilities', title: '知识能力', role: 'admin', groupId: 'team', icon: 'appstore' },
+  withTitle({ id: 'team', route: 'team', role: 'admin', groupId: 'team', icon: 'members' }),
+  withTitle({ id: 'projects', route: 'projects', role: 'admin', groupId: 'team', icon: 'projects' }),
+  withTitle({ id: 'capabilities', route: 'capabilities', role: 'admin', groupId: 'team', icon: 'appstore' }),
   // Without a group the sidebar does not list them: the overview opens from the topbar's book icon, the account page from the avatar.
-  { id: 'overview', route: 'overview', title: '总体规划', role: 'admin' },
-  { id: 'account', route: 'account', title: '个人设置', role: 'admin' },
+  withTitle({ id: 'overview', route: 'overview', role: 'admin' }),
+  withTitle({ id: 'account', route: 'account', role: 'admin' }),
 ];
 export const home: Record<Role, string> = { admin: 'projects', dev: 'projects' };
 
-export const levelTabs = [{ key: 'review', label: '产物管理' }, { key: 'tasks', label: '知识任务' }, { key: 'sources', label: '来源' }] as const;
+const tabKeys = { review: 'tnav.tabReview', tasks: 'tnav.tabTasks', sources: 'tnav.tabSources' } as const;
+export const levelTabs = (['review', 'tasks', 'sources'] as const).map(key => Object.defineProperties({ key } as { key: typeof key; label: string }, {
+  label: { get: () => currentT(tabKeys[key]), enumerable: true },
+}));
 export type LevelTab = typeof levelTabs[number]['key'];
 /** A tab of a level: #/projects?project=<id>&tab=<tab>, or #/team?tab=<tab> for the team; extra parameters follow. */
 export function levelHash(pid: string | null, tab: LevelTab = 'review', extra: Record<string, string> = {}) {

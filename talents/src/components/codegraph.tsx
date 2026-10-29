@@ -4,6 +4,8 @@ import ForceGraph, { type LinkObject } from 'force-graph';
 import { forceCollide, forceX, forceY } from 'd3-force-3d';
 import type { GraphSnapshot } from '../../../shared/codegraph.ts';
 import { graphView, type GraphLevel, type ViewNode } from '../codegraph-model.ts';
+import { currentT } from '../../../shared/i18n/index.ts';
+import { useT } from '../i18n.tsx';
 import { paintLabel, paintNode, paintSelection, palette, readTheme, rgba } from './codegraph-paint.ts';
 import { InfoTip } from './ui.tsx';
 import './codegraph.css';
@@ -15,7 +17,7 @@ type Source = { filePath: string; startLine: number; endLine: number; content: s
 async function get<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? '读取失败');
+  if (!response.ok) throw new Error(data.error ?? currentT('cg.readFailed'));
   return data;
 }
 
@@ -72,7 +74,7 @@ export function CodeGraphView({ projectId }: { projectId: string }) {
       .nodeLabel(n => {
         const tip = document.createElement('div'), title = tip.appendChild(document.createElement('strong'));
         title.textContent = n.name;
-        tip.append(document.createElement('br'), `${n.kind} · ${n.service} · ${degree(n)} 个关联${level === 'symbol' ? '' : ` · ${n.members.length} 个符号`}`);
+        tip.append(document.createElement('br'), `${n.kind} · ${n.service} · ${currentT('cg.related', { degree: degree(n) })}${level === 'symbol' ? '' : ` · ${currentT('cg.symbols', { count: n.members.length })}`}`);
         return tip;
       })
       .nodeCanvasObjectMode(() => 'replace')
@@ -137,50 +139,51 @@ export function CodeGraphView({ projectId }: { projectId: string }) {
       .then(setSource).catch(e => { if (!controller.signal.aborted) setSourceError(e.message); });
     return () => controller.abort();
   }, [node?.id, graph?.metadata.snapshotId]);
-  if (failure) return <Alert type="error" title="无法读取代码图谱" description={failure} action={<Button onClick={() => setAttempt(a => a + 1)}>重试</Button>} />;
-  if (!graph) return <Spin tip="正在读取真实索引…"><div style={{ height: 160 }} /></Spin>;
+  const t = useT();
+  if (failure) return <Alert type="error" title={t('cg.cannotRead')} description={failure} action={<Button onClick={() => setAttempt(a => a + 1)}>{t('shell.retry')}</Button>} />;
+  if (!graph) return <Spin tip={t('cg.loading')}><div style={{ height: 160 }} /></Spin>;
   const m = graph.metadata;
   const reset = () => { setSelected(''); setFocus(''); setQuery(''); };
   const connections = node ? graph.edges.filter(e => e.source === node.id || e.target === node.id) : [];
   return <div className="codegraph-view">
-    <div className="cg-stats">{[['文件', m.files], ['节点', m.nodes], ['关系', m.edges]].map(([label, value]) => <div key={label}><strong>{Number(value).toLocaleString()}</strong><span>{label}</span></div>)}</div>
+    <div className="cg-stats">{[['f.files', m.files], ['cg.nodes', m.nodes], ['cg.edges', m.edges]].map(([key, value]) => <div key={key}><strong>{Number(value).toLocaleString()}</strong><span>{t(key as 'f.files')}</span></div>)}</div>
     <div className="cg-toolbar">
-      <Segmented aria-label="图谱层级" value={level} onChange={v => { setLevel(v as GraphLevel); if (v === 'service') setService(''); reset(); }} options={[{ value: 'service', label: '服务概览' }, { value: 'file', label: '文件关系' }, { value: 'symbol', label: '符号关系' }]} />
-      <Select aria-label="服务筛选" value={service} onChange={v => { setService(v); reset(); }} options={[{ value: '', label: '全部服务' }, ...services.map(value => ({ value, label: value }))]} />
-      <Select aria-label="关系筛选" value={relation} onChange={setRelation} options={[{ value: '', label: '全部关系' }, ...Object.keys(m.edgeKinds).map(value => ({ value, label: value }))]} />
-      {level === 'symbol' && <><Select mode="multiple" aria-label="符号类型" placeholder="类 / 接口 / 方法 / 路由" value={kinds} onChange={setKinds} options={Object.keys(m.nodeKinds).map(value => ({ value, label: value }))} /><Select aria-label="邻域深度" value={hops} onChange={setHops} options={[{ value: 1, label: '1 跳邻域' }, { value: 2, label: '2 跳邻域' }]} /></>}
-      <Checkbox checked={tests} onChange={e => setTests(e.target.checked)}>包含测试</Checkbox>
-      <Checkbox checked={crossCalls} onChange={e => setCrossCalls(e.target.checked)}>包含跨服务调用</Checkbox>
-      <Button onClick={() => { reset(); instance.current?.zoomToFit(350, 35); }}>重置视图</Button>
+      <Segmented aria-label={t('cg.level')} value={level} onChange={v => { setLevel(v as GraphLevel); if (v === 'service') setService(''); reset(); }} options={[{ value: 'service', label: t('cg.serviceOverview') }, { value: 'file', label: t('cg.fileRelations') }, { value: 'symbol', label: t('cg.symbolRelations') }]} />
+      <Select aria-label={t('cg.serviceFilter')} value={service} onChange={v => { setService(v); reset(); }} options={[{ value: '', label: t('cg.allServices') }, ...services.map(value => ({ value, label: value }))]} />
+      <Select aria-label={t('cg.relationFilter')} value={relation} onChange={setRelation} options={[{ value: '', label: t('cg.allRelations') }, ...Object.keys(m.edgeKinds).map(value => ({ value, label: value }))]} />
+      {level === 'symbol' && <><Select mode="multiple" aria-label={t('cg.symbolKinds')} placeholder={t('cg.kindsPlaceholder')} value={kinds} onChange={setKinds} options={Object.keys(m.nodeKinds).map(value => ({ value, label: value }))} /><Select aria-label={t('cg.hops')} value={hops} onChange={setHops} options={[{ value: 1, label: t('cg.hop1') }, { value: 2, label: t('cg.hop2') }]} /></>}
+      <Checkbox checked={tests} onChange={e => setTests(e.target.checked)}>{t('cg.includeTests')}</Checkbox>
+      <Checkbox checked={crossCalls} onChange={e => setCrossCalls(e.target.checked)}>{t('cg.includeCrossCalls')}</Checkbox>
+      <Button onClick={() => { reset(); instance.current?.zoomToFit(350, 35); }}>{t('cg.resetView')}</Button>
     </div>
     <div className="cg-layout">
       <section className="cg-canvas-section">
-        <div ref={host} className="cg-canvas" aria-label="代码关系图" />
-        <div className="cg-search"><Input.Search aria-label="搜索图谱" placeholder="搜索当前图中的文件、类或方法" allowClear value={query} onChange={e => setQuery(e.target.value)} /><span className="caption" data-testid="graph-counts">{view.nodes.length} 节点 · {view.links.length} 连线</span></div>
-        {query && <div className="cg-results" aria-label="搜索结果">{results.slice(0, 30).map(n => <button key={n.id} onClick={() => choose(n)}>{n.name}<small>{n.service} · {n.kind}</small></button>)}{!results.length && <p>当前筛选范围没有匹配结果</p>}{results.length > 30 && <p>共 {results.length} 项，显示前 30 项，请缩小搜索范围。</p>}</div>}
-        {!view.nodes.length && <p className="cg-empty">当前筛选范围没有节点，请调整筛选条件。</p>}
+        <div ref={host} className="cg-canvas" aria-label={t('cg.canvas')} />
+        <div className="cg-search"><Input.Search aria-label={t('cg.search')} placeholder={t('cg.searchPlaceholder')} allowClear value={query} onChange={e => setQuery(e.target.value)} /><span className="caption" data-testid="graph-counts">{t('cg.counts', { nodes: view.nodes.length, links: view.links.length })}</span></div>
+        {query && <div className="cg-results" aria-label={t('cg.results')}>{results.slice(0, 30).map(n => <button key={n.id} onClick={() => choose(n)}>{n.name}<small>{n.service} · {n.kind}</small></button>)}{!results.length && <p>{t('cg.noResults')}</p>}{results.length > 30 && <p>{t('cg.tooMany', { count: results.length })}</p>}</div>}
+        {!view.nodes.length && <p className="cg-empty">{t('cg.empty')}</p>}
         <div className="cg-legend">
           {services.filter(s => !service || s === service).map(s => <span key={s}><i style={{ background: colors.get(s) }} />{s}</span>)}
-          <InfoTip>拖动节点调整布局，滚轮缩放，悬停高亮关联节点，点击查看详情。箭头和流动光点由 source 指向 target；同类型连线按原始边数量聚合。</InfoTip>
+          <InfoTip>{t('cg.help')}</InfoTip>
         </div>
       </section>
       <aside className="cg-detail">
-        {!selectedGroup ? <p className="cg-placeholder">选择节点查看详情</p> : <>
-          <Tag>{selectedGroup.kind}</Tag><h3>{selectedGroup.name}</h3><p className="path">{selectedGroup.id}</p><p>{selectedGroup.members.length} 个原始符号</p>
-          {level === 'service' ? <Button onClick={() => { setService(selectedGroup.id); setLevel('file'); reset(); }}>浏览服务文件</Button> : level === 'file' ? <Button onClick={() => {
+        {!selectedGroup ? <p className="cg-placeholder">{t('cg.placeholder')}</p> : <>
+          <Tag>{selectedGroup.kind}</Tag><h3>{selectedGroup.name}</h3><p className="path">{selectedGroup.id}</p><p>{t('cg.rawSymbols', { count: selectedGroup.members.length })}</p>
+          {level === 'service' ? <Button onClick={() => { setService(selectedGroup.id); setLevel('file'); reset(); }}>{t('cg.browseFiles')}</Button> : level === 'file' ? <Button onClick={() => {
             const seed = graph.nodes.find(n => n.filePath === selectedGroup.id && ['class', 'interface', 'function'].includes(n.kind));
             setLevel('symbol'); setKinds([]); setSelected(seed?.id ?? ''); setFocus(seed?.id ?? '');
-          }}>展开符号邻域</Button> : <Space wrap><Button onClick={() => setFocus(selected)}>聚焦邻域</Button><Button onClick={() => setFocus('')}>显示服务全部符号</Button></Space>}
+          }}>{t('cg.expandNeighbourhood')}</Button> : <Space wrap><Button onClick={() => setFocus(selected)}>{t('cg.focusNeighbourhood')}</Button><Button onClick={() => setFocus('')}>{t('cg.showAllSymbols')}</Button></Space>}
           {node && level !== 'service' && <><p className="path">{node.filePath}:{node.startLine}–{node.endLine}</p><p>{node.layer}</p>{node.signature && <pre>{node.signature}</pre>}
-            <h4>关联 <span className="section-count">{connections.length}</span></h4>
+            <h4>{t('cg.connections')} <span className="section-count">{connections.length}</span></h4>
             <div className="cg-connections">{connections.slice(0, 40).map(e => {
               const incoming = e.target === node.id, other = graph.nodes.find(n => n.id === (incoming ? e.source : e.target));
               return other && <button key={e.id} onClick={() => { setService(''); setTests(tests || other.test); setKinds([]); setRelation(''); setLevel('symbol'); setSelected(other.id); setFocus(other.id); setCrossCalls(crossCalls || (e.crossService && e.kind === 'calls')); }}>
-                {incoming ? '←' : '→'} {e.kind} · {other.name}<small>{e.provenance ?? '来源未标注'}{e.line ? ` · L${e.line}` : ''}</small>
+                {incoming ? '←' : '→'} {e.kind} · {other.name}<small>{e.provenance ?? t('cg.provenanceUnknown')}{e.line ? ` · L${e.line}` : ''}</small>
               </button>;
             })}</div>
-            <h4>快照源码{source && ` · L${source.startLine}–${source.endLine}`}</h4>{sourceError ? <Alert type="error" title={sourceError} /> : source ? <pre className="cg-source">{source.content.split('\n').map((line, i) => <span key={i} className={source.startLine + i >= node.startLine && source.startLine + i <= node.endLine ? 'cg-source-selected' : ''}><em>{source.startLine + i}</em>{line}{'\n'}</span>)}</pre> : <Spin />}
-            {source && source.endLine < node.endLine && <p className="caption">仅预览前 300 行</p>}</>}
+            <h4>{t('cg.snapshotSource')}{source && ` · L${source.startLine}–${source.endLine}`}</h4>{sourceError ? <Alert type="error" title={sourceError} /> : source ? <pre className="cg-source">{source.content.split('\n').map((line, i) => <span key={i} className={source.startLine + i >= node.startLine && source.startLine + i <= node.endLine ? 'cg-source-selected' : ''}><em>{source.startLine + i}</em>{line}{'\n'}</span>)}</pre> : <Spin />}
+            {source && source.endLine < node.endLine && <p className="caption">{t('cg.sourcePreviewOnly')}</p>}</>}
         </>}
       </aside>
     </div>

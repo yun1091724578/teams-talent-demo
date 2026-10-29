@@ -1,6 +1,6 @@
 import type { Role } from './domain.js';
 
-export interface SystemRuntime { app: 'teams'; teamsOrigin: string; talentOrigin: string }
+export interface SystemRuntime { app: 'teams'; teamsOrigin: string; talentOrigin: string; defaultLocale?: 'zh' | 'en' }
 export interface SystemLinkContext { projectId?: string; requirementId?: string; taskId?: string; role?: Role }
 export function systemRuntime(): SystemRuntime {
   const element = document.getElementById('demo-system-runtime');
@@ -20,6 +20,8 @@ export function currentSystemContext(): Required<Pick<SystemLinkContext, 'projec
   const requestedRole = search.get('demo-role');
   return { projectId, taskId, role: requestedRole === 'member' || requestedRole === 'owner' ? requestedRole : localStorage.getItem('carddemo-role') === 'member' ? 'member' : 'owner', requirementId: hash.get('requirement') ?? search.get('requirement') ?? (projectId === 'carddemo' ? 'DEMO-MKT-001' : projectId === 'teams' && taskId ? 'REQ-' + taskId : undefined) };
 }
+/** The two apps run on different origins, so the choice travels in the link, not localStorage. */
+const linkLocale = () => (typeof localStorage !== 'undefined' && localStorage.getItem('demo-locale') === 'en' ? 'en' : 'zh');
 function teamsSystemLink(page: string, supplied: SystemLinkContext = {}) {
   const current = currentSystemContext();
   const context = { ...current, ...supplied };
@@ -38,6 +40,7 @@ function teamsSystemLink(page: string, supplied: SystemLinkContext = {}) {
   if (!hash.has('task') && context.taskId) hash.set('task', context.taskId);
   const url = new URL('/teams', systemRuntime().teamsOrigin);
   url.searchParams.set('demo-role', context.role);
+  url.searchParams.set('lang', linkLocale());
   url.hash = '/' + path + '?' + hash;
   return url.toString();
 }
@@ -49,6 +52,7 @@ export function talentLink(page: string, supplied: SystemLinkContext = {}) {
   const target = name === 'knowledge' ? 'review' : ['sessions', 'evolution'].includes(name) ? 'tasks' : name;
   const url = new URL('/talents', systemRuntime().talentOrigin);
   url.searchParams.set('role', 'owner');
+  url.searchParams.set('lang', linkLocale());
   url.hash = '/' + target + '?project=' + encodeURIComponent(context.projectId);
   return url.toString();
 }

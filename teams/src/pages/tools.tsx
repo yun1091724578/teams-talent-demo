@@ -1,8 +1,10 @@
-import { TaskSessions } from '../components/task-sessions.js';
+﻿import { TaskSessions } from '../components/task-sessions.js';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Descriptions, Space, Tag } from 'antd';
 import { CheckCircleOutlined, CodeOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { useDemo } from '../context.js';
+import { useT } from '../i18n.js';
+import { serverText } from '../task-labels-en.js';
 import { getEngineLocation, getTools, native, type NativeStatus } from '../api.js';
 import { FrameworkCard } from '../vendor/teams/components/page-layout.js';
 import { Origin, Mono } from '../components/common.js';
@@ -10,6 +12,7 @@ import { AgentManagement } from '../components/agent-management.js';
 
 export function NativeControls({ compact = false }: { compact?: boolean }) {
   const { role, run, state, showText } = useDemo();
+  const t = useT();
   const [status, setStatus] = useState<NativeStatus>(), [pending, setPending] = useState(''), [error, setError] = useState(''), [receipt, setReceipt] = useState<any>(null);
   useEffect(() => { let live = true; getTools().then(s => { if (live) setStatus(s); }).catch(e => { if (live) setError(e.message); }); return () => { live = false; }; }, []);
   const launch = async () => {
@@ -17,20 +20,20 @@ export function NativeControls({ compact = false }: { compact?: boolean }) {
     try { setReceipt(await native(role, 'launch', { tool: 'icode', restore: false, requestId: crypto.randomUUID() })); }
     catch (e) { setError((e as Error).message); } finally { setPending(''); }
   };
-  const context = async () => { await run(async () => { const value = await native(role, 'context'); showText('iCode 作业上下文 · 已导出文件', value.path + '\n\n建议在 iCode 输入：\n' + value.prompt + '\n\n' + value.content); }); };
-  const copyContext = async () => { await run(async () => { const value = await native(role, 'context'); await navigator.clipboard.writeText(value.prompt); }, 'iCode 上下文读取指令已复制'); };
+  const context = async () => { await run(async () => { const value = await native(role, 'context'); showText(t('tools.contextExportedTitle'), t('tools.contextExportedBody', { path: value.path, prompt: value.prompt, content: value.content })); }); };
+  const copyContext = async () => { await run(async () => { const value = await native(role, 'context'); await navigator.clipboard.writeText(value.prompt); }, t('tools.contextCopied')); };
   return <div className="native-controls">
     {!compact && <Descriptions column={1} size="small" items={[
-      { key: 'version', label: '配套实例', children: status?.icode.version ?? '正在探测…' },
-      { key: 'source', label: '发现方式', children: status?.icode.source === 'official' ? '官方安装位置自动发现' : status?.icode.source === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : status?.icode.source === 'uv' ? 'uv tool 安装回执' : status?.icode.source === 'pipx' ? 'pipx 虚拟环境' : status?.icode.source === 'path' ? 'PATH 中的 icode 可执行文件' : status?.icode.source === 'bundled' ? '仓库内开发包' : status?.icode.source === 'missing' ? '未发现可用安装' : '正在探测…' },
-      { key: 'directory', label: '项目工作目录', children: <Mono>{status ? status.icode.workspace ?? '尚未配置项目工作区' : '正在读取…'}</Mono> },
+      { key: 'version', label: t('tools.instance'), children: status?.icode.version ?? t('tools.probing') },
+      { key: 'source', label: t('tools.discovery'), children: status?.icode.source === 'official' ? t('tools.discovery.official') : status?.icode.source === 'override' ? t('tools.discovery.override') : status?.icode.source === 'uv' ? t('tools.discovery.uv') : status?.icode.source === 'pipx' ? t('tools.discovery.pipx') : status?.icode.source === 'path' ? t('tools.discovery.path') : status?.icode.source === 'bundled' ? t('tools.discovery.bundled') : status?.icode.source === 'missing' ? t('tools.discovery.missing') : t('tools.probing') },
+      { key: 'directory', label: t('tools.workdir'), children: <Mono>{status ? status.icode.workspace ?? t('tools.noWorkdir') : t('tools.reading')}</Mono> },
     ]} />}
-    {status?.workspaceError && <Alert type="info" title="需要配置项目工作区" description={status.workspaceError} />}
-    {!!status?.icode.notes?.length && <Alert type="warning" title="iCode 探测说明" description={status.icode.notes.join('；')} />}
-    <Space wrap><Button type="primary" icon={<CodeOutlined />} loading={pending === 'start'} disabled={!status?.icode.installed || !status.icode.workspace || !!pending} onClick={() => void launch()}>启动 iCode</Button><Button onClick={() => { setError(''); void getEngineLocation().then(value => showText('chrys.engine.locate', JSON.stringify(value, null, 2))).catch(e => setError((e as Error).message)); }}>引擎定位</Button>{state.context && <><Button onClick={() => void context()}>导出作业上下文</Button><Button onClick={() => void copyContext()}>复制上下文指令</Button></>}</Space>
-    {error && <Alert type="error" title="本机操作未完成" description={error} showIcon />}
-    {receipt && <Alert type="success" showIcon title={'已请求 ' + (receipt.terminal ?? '本机终端') + ' 打开工具'} description={receipt.note} />}
-    <p className="muted native-note">启动前请确认本机已安装 iCode。作业上下文需在工具中显式读取，不会自动发送模型请求。</p>
+    {status?.workspaceError && <Alert type="info" title={t('tools.workdirRequired')} description={serverText(status.workspaceError)} />}
+    {!!status?.icode.notes?.length && <Alert type="warning" title={t('tools.probeNotes')} description={status.icode.notes.join(t('common.listSeparator'))} />}
+    <Space wrap><Button type="primary" icon={<CodeOutlined />} loading={pending === 'start'} disabled={!status?.icode.installed || !status.icode.workspace || !!pending} onClick={() => void launch()}>{t('tools.launch')}</Button><Button onClick={() => { setError(''); void getEngineLocation().then(value => showText('chrys.engine.locate', JSON.stringify(value, null, 2))).catch(e => setError((e as Error).message)); }}>{t('tools.engine')}</Button>{state.context && <><Button onClick={() => void context()}>{t('tools.exportContext')}</Button><Button onClick={() => void copyContext()}>{t('tools.copyContext')}</Button></>}</Space>
+    {error && <Alert type="error" title={t('tools.failed')} description={error} showIcon />}
+    {receipt && <Alert type="success" showIcon title={t('tools.requested', { terminal: receipt.terminal ?? t('tools.localTerminal') })} description={receipt.note} />}
+    <p className="muted native-note">{t('tools.note')}</p>
   </div>;
 }
 
@@ -38,4 +41,4 @@ export function Tools() {
   return <AgentManagement nativeControls={<NativeControls />} />;
 }
 
-export function SessionReporting(){ return <div className="page-stack"><TaskSessions readonly/><FrameworkCard title="开发工具" action={<Origin kind="native"/>}><NativeControls compact/></FrameworkCard></div>; }
+export function SessionReporting(){ const t = useT(); return <div className="page-stack"><TaskSessions readonly/><FrameworkCard title={t('tools.developmentTools')} action={<Origin kind="native"/>}><NativeControls compact/></FrameworkCard></div>; }

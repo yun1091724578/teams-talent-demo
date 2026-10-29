@@ -5,6 +5,7 @@ import type { TalentNodeInputs } from './talent-node-inputs.js';
 import type { TalentTaskInputs } from './talent-contract.js';
 import type { SkillBinding } from './resource-sharing.js';
 import { DomainError, type DemoState, type Role } from './domain.js';
+import { translate, type MessageKey } from '../../shared/i18n/index.js';
 import { projectMembers } from './teams-domain.js';
 export type RequirementNode = 'prepare' | 'develop' | 'verify' | 'accept';
 export type RequirementStage = 'preparing' | 'developing' | 'verifying' | 'awaiting-acceptance' | 'accepted' | 'returned';
@@ -26,7 +27,11 @@ export interface DeliveryRequirement {
  legacyBasis?:{stage:DemoState['stage'];checks:DemoState['checks'];contextId:string|null;origin:'legacy-snapshot'};
 }
 export const mainRequirementId='DEMO-MKT-001';
-export const requirementStageLabels:Record<RequirementStage,string>={preparing:'需求澄清',developing:'功能开发',verifying:'测试验证','awaiting-acceptance':'待 Owner 验收',accepted:'已验收',returned:'已退回'};
+export const requirementStageKeys = { preparing: 'reqStage.preparing', developing: 'reqStage.developing', verifying: 'reqStage.verifying', 'awaiting-acceptance': 'reqStage.awaiting-acceptance', accepted: 'reqStage.accepted', returned: 'reqStage.returned' } as const satisfies Record<RequirementStage, MessageKey>;
+/** Server-side messages quote the stage in Chinese; the UI translates requirementStageKeys itself. */
+export const requirementStageLabels: Record<RequirementStage, string> = Object.fromEntries(
+  (Object.keys(requirementStageKeys) as RequirementStage[]).map(stage => [stage, translate('zh', requirementStageKeys[stage])]),
+) as Record<RequirementStage, string>;
 export const deliveryRequirement=(state:DemoState,projectId:string,taskId?:string)=>(state.workspace.deliveryRequirements??[]).find(task=>task.projectId===projectId&&task.id===taskId);
 export const requirementNode=(task:DeliveryRequirement):RequirementNode=>task.stage==='preparing'?'prepare':task.stage==='developing'||task.stage==='returned'?'develop':task.stage==='verifying'?'verify':'accept';
 export function requireDeliveryMember(state:DemoState,task:DeliveryRequirement,role:Role){if(!['owner','member'].includes(role)||task.assigneeId!==role||!projectMembers(state,task.projectId).some(member=>member.id===role&&member.status==='active'))throw new DomainError('仅当前需求交付人可以回传工作状态',403);}

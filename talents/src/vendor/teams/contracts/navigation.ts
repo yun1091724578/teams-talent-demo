@@ -1,9 +1,9 @@
 /** Framework navigation identity is stable; labels and ordering belong to the host. */
 export const navigationGroups = [
-  { id: 'personal', title: '个人空间', order: 0 },
-  { id: 'team', title: '团队空间', order: 1 },
-  { id: 'shared', title: '共享能力', order: 2 },
-  { id: 'custom', title: '自定义', order: 3, emptyMessage: '暂无独立扩展页面' },
+  { id: 'personal', titleKey: 'nav.group.personal', order: 0 },
+  { id: 'team', titleKey: 'nav.group.team', order: 1 },
+  { id: 'shared', titleKey: 'nav.group.shared', order: 2 },
+  { id: 'custom', titleKey: 'nav.group.custom', order: 3, emptyKey: 'nav.group.empty' },
 ] as const
 export type NavigationGroupId = typeof navigationGroups[number]['id']
 export const navigationNodes: ReadonlyArray<{ kind: 'group'; groupId: NavigationGroupId } | { kind: 'page'; pageId: 'extensions' }> = [

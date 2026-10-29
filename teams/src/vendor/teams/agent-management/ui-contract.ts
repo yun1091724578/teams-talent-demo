@@ -5,6 +5,7 @@
  */
 import type { BrowserObservation } from './browser-observation.js'
 import type { UiNotifications } from './notifications.js'
+import { vt } from '../i18n.js'
 export const UI_API_VERSION = '2' as const
 /** API 3 additionally requires the host's browser observation capability at mount. */
 export const UI_OBSERVATION_API_VERSION = '3' as const
@@ -137,11 +138,11 @@ export function confirmAction(options: ConfirmActionOptions): Promise<boolean> {
     const cancel = document.createElement('button')
     cancel.type = 'button'
     cancel.className = ui.button
-    cancel.textContent = options.cancelText ?? '取消'
+    cancel.textContent = options.cancelText ?? vt('common.cancel')
     const confirm = document.createElement('button')
     confirm.type = 'button'
     confirm.className = options.danger ? ui.buttonDanger : ui.buttonPrimary
-    confirm.textContent = options.confirmText ?? '确认'
+    confirm.textContent = options.confirmText ?? vt('common.confirm')
     actions.append(cancel, confirm)
     card.append(title, message, actions)
     overlay.append(card)

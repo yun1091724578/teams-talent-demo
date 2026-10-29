@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Button } from 'antd';
+import { vt } from '../i18n.js';
 /** React presentation port of agent-resources/src/client/ui/index.ts:
  * resourceMeta, gridCard, listRow (lines 256–288), card/renderLocal (584–664).
  * Keep the upstream DOM hierarchy; callers provide demo data and commands. */
@@ -9,8 +10,8 @@ export function ResourceMeta({ item }: { item: ResourceEntry }) {
 }
 export function ResourceCatalogEntry({ item, view, details, action }: { item: ResourceEntry; view: 'grid' | 'list'; details: () => void; action: ReactNode }) {
   const icon = <span className="resource-icon" aria-hidden>{item.category === 'skill' ? '</>' : '🤖'}</span>;
-  if (view === 'list') return <article className="resource-row">{icon}<div className="resource-row-name"><strong title={item.name}>{item.name}</strong><p className="resource-description">{item.description}</p></div><ResourceMeta item={item} /><Button onClick={details}>查看详情</Button>{action}</article>;
-  return <article className="resource-card"><div className="resource-heading">{icon}<div><h3 title={item.name}>{item.name}</h3></div></div><p className="resource-description">{item.description}</p><ResourceMeta item={item} /><footer><span className="ui-note">{item.availability ?? (item.selected ? '项目已选择 · 无凭据要求' : '本地导入素材 · 可预览')}</span><Button onClick={details}>查看详情</Button>{action}</footer></article>;
+  if (view === 'list') return <article className="resource-row">{icon}<div className="resource-row-name"><strong title={item.name}>{item.name}</strong><p className="resource-description">{item.description}</p></div><ResourceMeta item={item} /><Button onClick={details}>{vt('res.viewDetail')}</Button>{action}</article>;
+  return <article className="resource-card"><div className="resource-heading">{icon}<div><h3 title={item.name}>{item.name}</h3></div></div><p className="resource-description">{item.description}</p><ResourceMeta item={item} /><footer><span className="ui-note">{item.availability ?? (item.selected ? vt('res.card.selected') : vt('res.card.local'))}</span><Button onClick={details}>{vt('res.viewDetail')}</Button>{action}</footer></article>;
 }
 export function ResourceLibraryEntry({ item, meta, actions }: { item: ResourceEntry; meta: string; actions: ReactNode }) {
   return <article className="resource-library-entry"><h3>{item.name}</h3><p className="ui-note">{meta}</p><div className="resource-actions">{actions}</div></article>;

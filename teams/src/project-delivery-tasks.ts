@@ -1,5 +1,6 @@
-import { requirementNode, requirementStageLabels, type DeliveryRequirement, type RequirementNode } from './delivery-requirements.js';
-import { stageLabels, type DemoState, type Role } from './domain.js';
+import { requirementNode, requirementStageKeys, type DeliveryRequirement, type RequirementNode } from './delivery-requirements.js';
+import { stageKeys, type DemoState, type Role } from './domain.js';
+import { currentT } from '../../shared/i18n/index.js';
 import { taskAssigneeId, taskAssigneeName } from './task-assignment.js';
 import { projectTasksVisibleTo, taskExecutableBy, taskVisibleTo } from './task-visibility.js';
 import { mainTask } from './task-automation.js';
@@ -19,7 +20,7 @@ export function projectDeliveryTasks(state: DemoState, projectId: string, role: 
   const tasks: ProjectDeliveryTask[] = [];
   if (projectId === mainTask.projectId && !state.workspace.deliveryRequirements?.some(task=>task.projectId===projectId&&task.id===mainTask.taskId)) {
     const node: RequirementNode = ['submitted', 'accepted'].includes(state.stage) ? 'accept' : ['failed', 'fixed'].includes(state.stage) ? 'verify' : ['developing', 'returned'].includes(state.stage) ? 'develop' : 'prepare';
-    tasks.push({ id: mainTask.taskId, projectId, title: '信用卡消费返现', owner: taskAssigneeName(state), assigneeId: state.assigned ? taskAssigneeId(state) : null, status: state.assigned ? stageLabels[state.stage] : '待分配', phase: phases[state.stage], node, route: taskRoute(projectId, mainTask.taskId, node), accepted: state.stage === 'accepted', pendingAssignment: !state.assigned });
+    tasks.push({ id: mainTask.taskId, projectId, title: '信用卡消费返现', owner: taskAssigneeName(state), assigneeId: state.assigned ? taskAssigneeId(state) : null, status: currentT(state.assigned ? stageKeys[state.stage] : 'stage.unassigned'), phase: phases[state.stage], node, route: taskRoute(projectId, mainTask.taskId, node), accepted: state.stage === 'accepted', pendingAssignment: !state.assigned });
   }
   const records = (state.workspace.deliveryRequirements ?? []).filter(record => record.projectId === projectId);
   if (!records.length) return tasks.filter(task => taskVisibleTo(role, task.assigneeId));
@@ -27,7 +28,7 @@ export function projectDeliveryTasks(state: DemoState, projectId: string, role: 
   for (const record of records) {
     const phase: DeliveryPhase = record.stage === 'accepted' ? '已交付' : record.stage === 'awaiting-acceptance' ? '待验收' : record.stage === 'verifying' ? '验证' : record.stage === 'preparing' ? '准备' : '开发';
     const node = requirementNode(record);
-    tasks.push({ id: record.id, projectId, title: record.title, owner: members.find(member => member.id === record.assigneeId)?.name ?? '待分配', assigneeId: record.assigneeId||null, status:record.assigneeId?requirementStageLabels[record.stage]:'待分配', phase:record.assigneeId?phase:'待开展', node, route: taskRoute(projectId, record.id, node), accepted: record.stage === 'accepted', pendingAssignment:!record.assigneeId, createdAt:record.createdAt, record });
+    tasks.push({ id: record.id, projectId, title: record.title, owner: members.find(member => member.id === record.assigneeId)?.name ?? currentT('stage.unassigned'), assigneeId: record.assigneeId||null, status:currentT(record.assigneeId?requirementStageKeys[record.stage]:'stage.unassigned'), phase:record.assigneeId?phase:'待开展', node, route: taskRoute(projectId, record.id, node), accepted: record.stage === 'accepted', pendingAssignment:!record.assigneeId, createdAt:record.createdAt, record });
   }
   return tasks.filter(task => taskVisibleTo(role, task.assigneeId));
 }

@@ -8,6 +8,10 @@
     "start": "node scripts/demo.mjs start --open",
     "stop": "node scripts/demo.mjs stop",
     "reset:task": "node scripts/reset-task.mjs",
+    "i18n:scan": "node scripts/i18n-scan.mjs",
+    "i18n:write": "node scripts/i18n-scan.mjs --write",
+    "i18n:baseline": "node scripts/i18n-scan.mjs --baseline",
+    "i18n:check": "node scripts/i18n-scan.mjs --check",
     "test": "npm --prefix teams test && npm --prefix teams run test:http && npm --prefix talents test"
   }
 }

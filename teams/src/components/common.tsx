@@ -3,15 +3,20 @@ import { Button, Tag, Space, Tooltip } from 'antd';
 import { ArrowRightOutlined, CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 import { useDemo } from '../context.js';
-import { actionLabels, type Action, type Role } from '../domain.js';
+import { useT } from '../i18n.js';
+import { actionKeys, type Action, type Role } from '../domain.js';
+const originKeys = { historical: 'origin.historical', static: 'origin.static', native: 'origin.native' } as const;
 export function Origin({ kind }: { kind: 'historical' | 'simulated' | 'static' | 'native' }) {
+  const t = useT();
   if (kind === 'simulated') return null;
-  return <Tag className="origin-tag" color={{ historical: 'blue', simulated: 'default', static: 'purple', native: 'green' }[kind]}>{{ historical: '历史证据', static: '源码分析', native: '本机实接' }[kind]}</Tag>;
+  return <Tag className="origin-tag" color={{ historical: 'blue', simulated: 'default', static: 'purple', native: 'green' }[kind]}>{t(originKeys[kind])}</Tag>;
 }
-export function ActionButton({ action, children, disabled, role: required, primary = true }: { action: Action; children?: ReactNode; disabled?: boolean; role?: Role; primary?: boolean }) {
+/** Labels are completion statements ("Requirement assigned"); buttons always pass their own text. */
+export function ActionButton({ action, children, disabled, role: required, primary = true }: { action: Action; children: ReactNode; disabled?: boolean; role?: Role; primary?: boolean }) {
   const { perform, role, busy, state } = useDemo();
+  const t = useT();
   const wrongRole = required && required !== role;
-  return <Tooltip title={wrongRole ? '请切换为项目' + (required === 'owner' ? ' Owner' : '成员') : undefined}><Button data-action={action} aria-label={typeof children === 'string' ? children : actionLabels[action]} type={primary ? 'primary' : 'default'} disabled={disabled || !!wrongRole || required === 'member' && !currentMemberOwnsTask(state) || busy} loading={busy} onClick={() => void perform(action)}>{children ?? actionLabels[action]}</Button></Tooltip>;
+  return <Tooltip title={wrongRole ? t(required === 'owner' ? 'action.requiresOwner' : 'action.requiresMember') : undefined}><Button data-action={action} aria-label={typeof children === 'string' ? children : t(actionKeys[action])} type={primary ? 'primary' : 'default'} disabled={disabled || !!wrongRole || required === 'member' && !currentMemberOwnsTask(state) || busy} loading={busy} onClick={() => void perform(action)}>{children}</Button></Tooltip>;
 }
 export function LinkButton({ href, children, external = false }: { href: string; children: ReactNode; external?: boolean }) { return <Button href={href} target={external ? '_blank' : undefined} icon={<ArrowRightOutlined />} iconPlacement="end">{children}</Button>; }
 export function Heading({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {

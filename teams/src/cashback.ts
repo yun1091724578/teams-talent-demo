@@ -1,4 +1,5 @@
 /** Local workflow contract. Dates and rounding are fixture assumptions, not approved production policy. */
+import { currentT } from '../../shared/i18n/index.js';
 export const campaign = Object.freeze({
   id: 'platinum-extra-cashback-v1',
   start: '2026-11-01T00:00:00+08:00',
@@ -29,15 +30,15 @@ export interface CashbackCheck { id: string; label: string; expected: string; ac
 export function runCashbackChecks(): CashbackCheck[] {
   const valid = { amountCents: 12000, cardTier: 'platinum' as const, purchasedAt: campaign.purchaseAt };
   const examples: Array<{ id: string; label: string; input: PurchaseInput; expected: number }> = [
-    { id: 'CB-01', label: '白金卡消费 120 元', input: valid, expected: 60 },
-    { id: 'CB-02', label: '普通卡不参与', input: { ...valid, cardTier: 'standard' }, expected: 0 },
-    { id: 'CB-03', label: '活动开始时刻包含在内', input: { ...valid, purchasedAt: campaign.start }, expected: 60 },
-    { id: 'CB-04', label: '结束前一毫秒有效', input: { ...valid, purchasedAt: new Date(Date.parse(campaign.endExclusive) - 1).toISOString() }, expected: 60 },
-    { id: 'CB-05', label: '活动结束时刻不参与', input: { ...valid, purchasedAt: campaign.endExclusive }, expected: 0 },
-    { id: 'CB-06', label: '半分按分四舍五入', input: { ...valid, amountCents: 100 }, expected: 1 },
+    { id: 'CB-01', label: currentT('acc.chkCB01'), input: valid, expected: 60 },
+    { id: 'CB-02', label: currentT('acc.chkCB02'), input: { ...valid, cardTier: 'standard' }, expected: 0 },
+    { id: 'CB-03', label: currentT('acc.chkCB03'), input: { ...valid, purchasedAt: campaign.start }, expected: 60 },
+    { id: 'CB-04', label: currentT('acc.chkCB04'), input: { ...valid, purchasedAt: new Date(Date.parse(campaign.endExclusive) - 1).toISOString() }, expected: 60 },
+    { id: 'CB-05', label: currentT('acc.chkCB05'), input: { ...valid, purchasedAt: campaign.endExclusive }, expected: 0 },
+    { id: 'CB-06', label: currentT('acc.chkCB06'), input: { ...valid, amountCents: 100 }, expected: 1 },
   ];
-  const results = examples.map(item => { const result = calculateCashback(item.input); return { id: item.id, label: item.label, expected: `${item.expected} 分`, actual: `${result.rewardCents} 分`, passed: result.rewardCents === item.expected }; });
+  const results = examples.map(item => { const result = calculateCashback(item.input); return { id: item.id, label: item.label, expected: currentT('acc.cents', { value: item.expected }), actual: currentT('acc.cents', { value: result.rewardCents }), passed: result.rewardCents === item.expected }; });
   let rejected = false;
   try { calculateCashback({ ...valid, amountCents: 0 }); } catch (error) { rejected = error instanceof RangeError; }
-  return [...results, { id: 'CB-07', label: '零金额拒绝计算', expected: '拒绝', actual: rejected ? '拒绝' : '未拒绝', passed: rejected }];
+  return [...results, { id: 'CB-07', label: currentT('acc.chkCB07'), expected: currentT('acc.rejected'), actual: currentT(rejected ? 'acc.rejected' : 'acc.notRejected'), passed: rejected }];
 }

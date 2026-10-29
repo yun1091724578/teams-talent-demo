@@ -6,48 +6,53 @@ import { getTalentsKnowledge, type TalentsSkillVersion } from '../api.js';
 import { Button, Descriptions, Form, Input, Modal, Space, Tabs, Tag } from 'antd';
 import { FileTextOutlined, PlusOutlined } from '@ant-design/icons';
 import { useDemo } from '../context.js';
+import { useT } from '../i18n.js';
 import { FrameworkCard } from '../vendor/teams/components/page-layout.js';
 import { ActionButton, Mono, Origin } from '../components/common.js';
-import { stageLabels } from '../domain.js';
+import { stageKeys } from '../domain.js';
 import { ProjectContentTemplate } from '../components/project-content-template.js';
 import { ProjectAssets } from '../components/project-assets.js';
 import { ProjectKnowledge } from '../components/project-knowledge.js';
 
 export function ProjectContent() {
   const { state, data, role, navigate } = useDemo();
+  const t = useT();
   // Project skills Talents wrote a new version of (applying a trajectory diagnosis suggestion) show that version.
   const [talentsSkills, setTalentsSkills] = useState<TalentsSkillVersion[]>([]);
   useEffect(() => { let live = true; getTalentsKnowledge('carddemo').then(value => { if (live) setTalentsSkills(value.skills ?? []); }, () => undefined); return () => { live = false; }; }, [state.revision]);
+  const ownerName = state.workspace.team.members.find(item => item.id === 'owner')?.name ?? '';
+  const memberNames = projectMembers(state, 'carddemo').filter(member => member.status === 'active' && member.role === 'member').map(member => member.name).join(t('common.listSeparator'));
   return <ProjectContentTemplate projectId="carddemo" name={state.workspace.project.name} description={displayProjectDescription(state.workspace.project.description)} origin={<Origin kind="simulated" />}
     information={[
-      { key: 'team', label: '所属团队', children: projectTeam(state, 'carddemo').name }, { key: 'owner', label: '项目 Owner', children: '林悦' },
-      { key: 'repository', label: '主仓', span: 2, children: <Mono>{state.workspace.project.repository}</Mono> },
+      { key: 'team', label: t('pc.team'), children: projectTeam(state, 'carddemo').name }, { key: 'owner', label: t('pc.ownerLabel'), children: ownerName },
+      { key: 'repository', label: t('pc.repo'), span: 2, children: <Mono>{state.workspace.project.repository}</Mono> },
     ]}
-    members={<><Descriptions size="small" column={1} items={[{ key: 'owner', label: '林悦 · 项目 Owner', children: '项目资产与知识、需求分配、质量能力、验收及演进' }, { key: 'member', label: (projectMembers(state, 'carddemo').filter(member => member.status === 'active' && member.role === 'member').map(member => member.name).join('、') || '尚无成员') + ' · 项目成员', children: '需求上下文、开发、验证、交付与会话关联' }]} /><Button onClick={() => navigate('team?team=' + projectTeam(state, 'carddemo').id)}>查看团队成员</Button></>}
+    members={<><Descriptions size="small" column={1} items={[{ key: 'owner', label: ownerName + ' · ' + t('pc.ownerLabel'), children: t('pc.ownerDuties') }, { key: 'member', label: (memberNames || t('pc.noMembers')) + ' · ' + t('pc.memberLabel'), children: t('pc.memberDuties') }]} /><Button onClick={() => navigate('team?team=' + projectTeam(state, 'carddemo').id)}>{t('pc.viewTeamMembers')}</Button></>}
     assets={<ProjectAssets projectId="carddemo" />}
     knowledge={<ProjectKnowledge projectId="carddemo" />}
-    requirements={<><RequirementMaterials /><div className="card-actions"><Button type="primary" onClick={() => navigate('projects?tab=delivery&node=prepare')}>进入需求澄清</Button></div></>}
+    requirements={<><RequirementMaterials /><div className="card-actions"><Button type="primary" onClick={() => navigate('projects?tab=delivery&node=prepare')}>{t('pc.enterClarification')}</Button></div></>}
     skills={data.skills.filter(skill => data.blueprint.skill_groups.some(group => group.skills.includes(skill.name))).map(skill => {
-      const base = { ...skill, source: '项目采用的导入素材', displayPath: skill.path.slice(skill.path.indexOf('/workspace/') + 1), content: data.skillContents[skill.name] };
+      const base = { ...skill, source: t('pc.adoptedSource'), displayPath: skill.path.slice(skill.path.indexOf('/workspace/') + 1), content: data.skillContents[skill.name] };
       const written = talentsSkills.find(version => version.skillId === skill.name);
-      return written ? { ...base, version: written.version, source: `Talents 轨迹诊断改进 · 基于 ${written.basedOn.version} · ${written.note}`, content: written.files.find(file => file.path === 'SKILL.md')?.content ?? base.content } : base;
+      return written ? { ...base, version: written.version, source: t('pc.talentsImprovement', { version: written.basedOn.version, note: written.note }), content: written.files.find(file => file.path === 'SKILL.md')?.content ?? base.content } : base;
     })}
-    skillFooter={<div className="project-skill-context"><div><strong>本次交付配置</strong><p>前端 Skill {state.adoptedSkill} · Code Agent {state.adoptedAgent} · Review / 测试 / 安全扫描分别保留依据</p><Tag color="green">项目内可用</Tag></div><Space wrap><Button type="primary" onClick={() => navigate('projects?tab=delivery&node=prepare')}>在需求澄清中选用</Button><Button onClick={() => navigate('resources')}>查看共享能力</Button>{role === 'owner' && <Button onClick={() => navigate('connections?tab=quality')}>维护质量能力</Button>}</Space></div>}
+    skillFooter={<div className="project-skill-context"><div><strong>{t('pc.deliveryConfig')}</strong><p>{t('pc.deliveryConfigNote', { skill: state.adoptedSkill, agent: state.adoptedAgent })}</p><Tag color="green">{t('pc.availableInProject')}</Tag></div><Space wrap><Button type="primary" onClick={() => navigate('projects?tab=delivery&node=prepare')}>{t('pc.adoptInClarification')}</Button><Button onClick={() => navigate('resources')}>{t('pc.viewSharedCapabilities')}</Button>{role === 'owner' && <Button onClick={() => navigate('connections?tab=quality')}>{t('pc.maintainQuality')}</Button>}</Space></div>}
   />;
 }
 
 export function RequirementMaterials() {
   const { state, role, update, busy, showText, showEvidence } = useDemo();
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [form] = Form.useForm();
-  return <><div className="project-material-list"><div className="project-material"><FileTextOutlined /><div><strong>白金卡消费返现需求</strong><small>需求材料 · E1</small></div><Button size="small" onClick={() => showEvidence('E1')}>查看</Button></div>
-    {state.workspace.materials.map(material => <div className="project-material" key={material.id}><FileTextOutlined /><div><strong>{material.title}</strong><small>成员补充 · 本次需求</small></div><Button size="small" onClick={() => showText(material.title, material.body)}>查看</Button></div>)}</div>
-    {role === 'member' && <Button className="project-material-add" icon={<PlusOutlined />} disabled={!!state.context} onClick={() => setAdding(true)}>补充需求材料</Button>}
-    {state.context && <p className="muted">本次上下文已冻结，材料与业务 Skill 保留采用时的版本。</p>}
-    <Modal open={adding} title="补充需求材料" okText="保存到需求" onCancel={() => setAdding(false)} confirmLoading={busy} onOk={() => form.submit()} destroyOnHidden>
+  return <><div className="project-material-list"><div className="project-material"><FileTextOutlined /><div><strong>白金卡消费返现需求</strong><small>{t('pc.materialSource')}</small></div><Button size="small" onClick={() => showEvidence('E1')}>{t('pc.view')}</Button></div>
+    {state.workspace.materials.map(material => <div className="project-material" key={material.id}><FileTextOutlined /><div><strong>{material.title}</strong><small>{t('pc.memberSupplement')}</small></div><Button size="small" onClick={() => showText(material.title, material.body)}>{t('pc.view')}</Button></div>)}</div>
+    {role === 'member' && <Button className="project-material-add" icon={<PlusOutlined />} disabled={!!state.context} onClick={() => setAdding(true)}>{t('pc.addMaterial')}</Button>}
+    {state.context && <p className="muted">{t('pc.contextFrozen')}</p>}
+    <Modal open={adding} title={t('pc.addMaterial')} okText={t('pc.saveMaterial')} onCancel={() => setAdding(false)} confirmLoading={busy} onOk={() => form.submit()} destroyOnHidden>
       <Form form={form} layout="vertical" onFinish={async value => { const saved = await update('material.add', value); if (saved) { form.resetFields(); setAdding(false); } }}>
-        <Form.Item name="title" label="材料标题" rules={[{ required: true, whitespace: true }]}><Input maxLength={120} placeholder="例如：白金卡返现周期说明" /></Form.Item>
-        <Form.Item name="body" label="内容与来源" rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={6} maxLength={5000} placeholder="说明本需求的业务规则、补充资料或来源引用" /></Form.Item>
+        <Form.Item name="title" label={t('pc.field.title')} rules={[{ required: true, whitespace: true }]}><Input maxLength={120} placeholder={t('pc.field.titlePlaceholder')} /></Form.Item>
+        <Form.Item name="body" label={t('pc.field.body')} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={6} maxLength={5000} placeholder={t('pc.field.bodyPlaceholder')} /></Form.Item>
       </Form>
     </Modal>
   </>;
@@ -57,12 +62,16 @@ export function ProjectManagement() { return <ProjectTaskManagement projectId="c
 
 export function ProjectRelease() {
   const { state, navigate } = useDemo();
-  return <div className="page-stack"><FrameworkCard title="信用卡营销 · v0.1" action={<Tag color={state.stage === 'accepted' ? 'green' : 'gold'}>{state.stage === 'accepted' ? '功能交付已确认' : '交付准备中'}</Tag>}><Descriptions column={1} items={[{ key: 'scope', label: '版本范围', children: '信用卡消费返现 · MKT-001' }, { key: 'result', label: '交付状态', children: stageLabels[state.stage] }, { key: 'safety', label: '安全要求', children: <Tag color="gold">待验证</Tag> }, { key: 'release', label: '发布事实', children: '当前未登记部署或上线记录' }]} /><p>本页汇总当前版本的交付范围、验收记录与发布状态。</p><Space wrap><Button type="primary" onClick={() => navigate('projects?tab=delivery&node=accept')}>查看交付与验收</Button><Button onClick={() => navigate('trace')}>查看完整追溯</Button></Space></FrameworkCard></div>;
+  const t = useT();
+  return <div className="page-stack"><FrameworkCard title="信用卡营销 · v0.1" action={<Tag color={state.stage === 'accepted' ? 'green' : 'gold'}>{state.stage === 'accepted' ? t('pc.release.confirmed') : t('pc.release.preparing')}</Tag>}><Descriptions column={1} items={[{ key: 'scope', label: t('pc.release.scope'), children: '信用卡消费返现 · MKT-001' }, { key: 'result', label: t('pc.release.status'), children: t(stageKeys[state.stage]) }, { key: 'safety', label: t('pc.release.safety'), children: <Tag color="gold">{t('pc.release.toVerify')}</Tag> }, { key: 'release', label: t('pc.release.facts'), children: t('pc.release.noDeploy') }]} /><p>{t('pc.release.note')}</p><Space wrap><Button type="primary" onClick={() => navigate('projects?tab=delivery&node=accept')}>{t('pc.release.viewDelivery')}</Button><Button onClick={() => navigate('trace')}>{t('pc.release.viewTrace')}</Button></Space></FrameworkCard></div>;
 }
 
 export function ProjectSettings() {
   const { state, role, update, busy, navigate } = useDemo();
-  return <div className="page-stack"><FrameworkCard title="项目基础信息"><Form key={state.workspace.project.name + state.workspace.project.repository} layout="vertical" initialValues={{ ...state.workspace.project, description: displayProjectDescription(state.workspace.project.description) }} disabled={role !== 'owner'} onFinish={value => update('project.update', value)}>
-    <Form.Item name="name" label="项目名称" rules={[{ required: true, whitespace: true }]}><Input maxLength={80} /></Form.Item><Form.Item name="description" label="项目说明" rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={3} maxLength={1000} /></Form.Item><Form.Item name="repository" label="主仓地址或路径" rules={[{ required: true, whitespace: true }]}><Input maxLength={200} /></Form.Item>{role === 'owner' && <Button type="primary" htmlType="submit" loading={busy}>保存项目信息</Button>}
-  </Form></FrameworkCard><FrameworkCard title="项目成员与职责" action={<Origin kind="simulated" />}><Descriptions size="small" items={[{ key: 'team', label: '所属团队', children: projectTeam(state, 'carddemo').name }, { key: 'stage', label: '项目阶段', children: stageLabels[state.stage] }]} /><Descriptions bordered column={1} items={[{ key: 'owner', label: '林悦 · 项目 Owner', children: '项目资产与知识、需求分配、质量能力、验收及演进' }, { key: 'member', label: (projectMembers(state, 'carddemo').filter(member => member.status === 'active' && member.role === 'member').map(member => member.name).join('、') || '尚无成员') + ' · 项目成员', children: '需求上下文、开发、验证、交付与会话关联' }]} /><Button onClick={() => navigate('team?team=' + projectTeam(state, 'carddemo').id)}>查看团队成员</Button></FrameworkCard></div>;
+  const t = useT();
+  const ownerName = state.workspace.team.members.find(item => item.id === 'owner')?.name ?? '';
+  const memberNames = projectMembers(state, 'carddemo').filter(member => member.status === 'active' && member.role === 'member').map(member => member.name).join(t('common.listSeparator'));
+  return <div className="page-stack"><FrameworkCard title={t('pc.basicInfo')}><Form key={state.workspace.project.name + state.workspace.project.repository} layout="vertical" initialValues={{ ...state.workspace.project, description: displayProjectDescription(state.workspace.project.description) }} disabled={role !== 'owner'} onFinish={value => update('project.update', value)}>
+    <Form.Item name="name" label={t('pc.field.name')} rules={[{ required: true, whitespace: true }]}><Input maxLength={80} /></Form.Item><Form.Item name="description" label={t('pc.field.description')} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={3} maxLength={1000} /></Form.Item><Form.Item name="repository" label={t('pc.field.repository')} rules={[{ required: true, whitespace: true }]}><Input maxLength={200} /></Form.Item>{role === 'owner' && <Button type="primary" htmlType="submit" loading={busy}>{t('pc.saveProject')}</Button>}
+  </Form></FrameworkCard><FrameworkCard title={t('pc.membersTitle')} action={<Origin kind="simulated" />}><Descriptions size="small" items={[{ key: 'team', label: t('pc.team'), children: projectTeam(state, 'carddemo').name }, { key: 'stage', label: t('pc.stage'), children: t(stageKeys[state.stage]) }]} /><Descriptions bordered column={1} items={[{ key: 'owner', label: ownerName + ' · ' + t('pc.ownerLabel'), children: t('pc.ownerDuties') }, { key: 'member', label: (memberNames || t('pc.noMembers')) + ' · ' + t('pc.memberLabel'), children: t('pc.memberDuties') }]} /><Button onClick={() => navigate('team?team=' + projectTeam(state, 'carddemo').id)}>{t('pc.viewTeamMembers')}</Button></FrameworkCard></div>;
 }

@@ -4,6 +4,8 @@ import { Button, Segmented, Space, Tag, Tooltip } from 'antd';
 import { BellOutlined } from '@ant-design/icons';
 import { PageHeader } from '../vendor/teams/components/page-layout.tsx';
 import { useTalents } from '../store.tsx';
+import { useT } from '../i18n.tsx';
+import { currentT } from '../../../shared/i18n/index.ts';
 import { levelHash } from '../navigation.ts';
 import type { Artifact, Basis, TalentsState } from '../types.ts';
 import { artifact, basisOf, capability, changesSince, levelSources, source, type Changes } from '../demo/model.ts';
@@ -25,13 +27,14 @@ function staleChanges(st: TalentsState, a: Artifact) {
   return c && c.count ? c : null;
 }
 function StaleNote({ st, a, c }: { st: TalentsState; a: Artifact; c: Changes }) {
+  const t = useT();
   const docs = source(st, a.sources[0])?.type === 'docs';
-  return <div className="update-note"><b>{docs ? '提取后文档有变化' : '构建后代码有变化'}</b><span className="caption">{(docs ? versionLabel(c.from) + ' → ' + versionLabel(c.to) + '，' : '') + c.text}</span></div>;
+  return <div className="update-note"><b>{docs ? t('rv.docsChanged') : t('rv.codeChanged')}</b><span className="caption">{(docs ? versionLabel(c.from) + ' → ' + versionLabel(c.to) + '，' : '') + c.text}</span></div>;
 }
 function basisRow(st: TalentsState, a: Artifact, basis: Basis | null | undefined): [string, string] | null {
   const src = source(st, a.sources[0]);
   if (!basis || !src) return null;
-  return ['基于', src.name + '，' + (basis.version ? versionLabel(basis.version) : '提交 ' + basis.commit)];
+  return [currentT('rv.basedOn'), currentT('rv.basedOnValue', { name: src.name, version: basis.version ? versionLabel(basis.version) : currentT('rv.submitCommit', { commit: basis.commit ?? '' }) })];
 }
 
 // Re-extract opens the task form prefilled from the task that built this artifact; it does not start a run.
@@ -43,6 +46,7 @@ const sortTime = (a: Artifact) => a.draft?.created ?? a.published?.at ?? '';
 
 export function LevelReview({ pid, toolbar }: { pid: string | null; toolbar: Toolbar }) {
   const { state: st, go } = useTalents();
+  const t = useT();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const open = (a: Artifact) => go(levelHash(pid, 'review', { id: a.id }));
   // Needs the admin: a knowledge draft to review, or a diagnosis with suggestions to submit.
@@ -51,12 +55,12 @@ export function LevelReview({ pid, toolbar }: { pid: string | null; toolbar: Too
   const card = (a: Artifact, todo: boolean) => {
     const cap = capability(st, a.cap), diagnosis = isDiagnosis(a), n = diagnosis ? pendingCount(a) : 0, stale = !diagnosis && staleChanges(st, a);
     const docs = stale && source(st, a.sources[0])?.type === 'docs';
-    const tag = todo ? (diagnosis ? <Tag color="warning">{n} 条建议待提交</Tag> : <ArtifactStatus a={a} />)
-      : stale ? <Tooltip title={(docs ? versionLabel(stale.from) + ' → ' + versionLabel(stale.to) + '，' : '') + stale.text}><Tag color="warning">{docs ? '文档有变化' : '代码有变化'}</Tag></Tooltip> : null;
+    const tag = todo ? (diagnosis ? <Tag color="warning">{t('rv.suggestionsPending', { count: n })}</Tag> : <ArtifactStatus a={a} />)
+      : stale ? <Tooltip title={(docs ? versionLabel(stale.from) + ' → ' + versionLabel(stale.to) + '，' : '') + stale.text}><Tag color="warning">{docs ? t('rv.docsStale') : t('rv.codeStale')}</Tag></Tooltip> : null;
     const footer = (a.published && !a.draft ? 'v' + a.published.version + ' · ' : '') + when(sortTime(a));
     return <ItemCard key={a.id} icon={<CapIcon cap={cap} />} title={a.name} subtitle={todo ? cap.name : undefined} extra={tag} onClick={() => open(a)} caption={footer}
-      actions={todo ? <Button size="small" type="primary" onClick={() => open(a)}>{diagnosis ? '查看建议' : '审阅'}</Button>
-        : stale ? <Button size="small" onClick={() => go(reExtractHash(a))}>重新提取</Button> : undefined}>
+      actions={todo ? <Button size="small" type="primary" onClick={() => open(a)}>{diagnosis ? t('rv.viewSuggestions') : t('rv.review')}</Button>
+        : stale ? <Button size="small" onClick={() => go(reExtractHash(a))}>{t('rv.reExtract')}</Button> : undefined}>
       {a.desc && <p className="ui-note one-line" title={a.desc}>{a.desc}</p>}
     </ItemCard>;
   };
@@ -66,13 +70,13 @@ export function LevelReview({ pid, toolbar }: { pid: string | null; toolbar: Too
   const toggle = (id: string) => setExpanded(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return <>
     {toolbar()}
-    {!mine.length && <EmptyState title="还没有产物">{levelSources(st, pid).length === 0 && <Button type="link" onClick={() => go(levelHash(pid, 'sources'))}>登记来源</Button>}</EmptyState>}
-    {todo.length > 0 && <Section title={<span className="todo-title"><BellOutlined />需要处理</span>}><CardGrid>{todo.map(a => card(a, true))}</CardGrid></Section>}
+    {!mine.length && <EmptyState title={t('rv.noArtifacts')}>{levelSources(st, pid).length === 0 && <Button type="link" onClick={() => go(levelHash(pid, 'sources'))}>{t('rv.registerSource')}</Button>}</EmptyState>}
+    {todo.length > 0 && <Section title={<span className="todo-title"><BellOutlined />{t('rv.needsAction')}</span>}><CardGrid>{todo.map(a => card(a, true))}</CardGrid></Section>}
     {groups.map(({ cat, items }) => {
       const all = expanded.has(cat.id), shown = all ? items : items.slice(0, FOLD);
       return <Section key={cat.id} title={cat.name} note={items.length}>
         <CardGrid>{shown.map(a => card(a, false))}</CardGrid>
-        {items.length > FOLD && <Button type="link" className="fold-toggle" onClick={() => toggle(cat.id)}>{all ? '收起' : '展开全部 ' + items.length + ' 个'}</Button>}
+        {items.length > FOLD && <Button type="link" className="fold-toggle" onClick={() => toggle(cat.id)}>{all ? t('rv.collapse') : t('rv.expandAll', { count: items.length })}</Button>}
       </Section>;
     })}
   </>;
@@ -85,12 +89,13 @@ const isMd = (key: string) => /\.md$/.test(key);
 
 export function Workbench({ id }: { id: string }) {
   const { state: st } = useTalents();
+  const t = useT();
   const a = artifact(st, id);
   const which: K.Which = a?.draft ? 'current' : 'published';
   const [file, setFile] = useState(() => a && !K.isIndex(a) ? (K.files(a, which).find(f => !/index\.md$/.test(f)) ?? a.files?.[0] ?? null) : null);
   const [tab, setTab] = useState<'content' | 'diff'>('content');
   const [publishing, setPublishing] = useState(false);
-  if (!a) return <EmptyState>找不到这个产物。<a href="#/projects">返回项目</a></EmptyState>;
+  if (!a) return <EmptyState>{t('rv.notFound')}<a href="#/projects">{t('rv.backToProjects')}</a></EmptyState>;
   const cap = capability(st, a.cap), files = K.isIndex(a) ? [] : K.files(a, which);
   // Only a new version of published knowledge has something to compare with.
   const comparable = !!a.draft && !!a.published && !K.isIndex(a);
@@ -106,23 +111,23 @@ export function Workbench({ id }: { id: string }) {
   if (K.isIndex(a)) main = <IndexSummary a={a} />;
   else if (!file) main = null;
   else if (tab === 'diff' && comparable) main = isMd(file) ? <div className="diff-wrap"><DiffView before={online(file)} after={K.text(a, 'current', file)} /></div>
-    : <div className="index-summary"><p className="ui-note">这个文件不支持对比，请切换到“内容”查看。</p></div>;
+    : <div className="index-summary"><p className="ui-note">{t('rv.diffUnsupported')}</p></div>;
   else main = <FileContent st={st} a={a} file={file} text={K.text(a, which, file)} />;
 
   return <div className="wb">
-    <PageHeader title={a.name} description={cap.name} actions={<Space><ArtifactStatus a={a} />{(a.draft || (a.kind === 'files' && !a.submission)) && <Button type="primary" onClick={() => setPublishing(true)}>{K.isIndex(a) ? '启用远端索引' : '提交 PR'}</Button>}</Space>} />
+    <PageHeader title={a.name} description={cap.name} actions={<Space><ArtifactStatus a={a} />{(a.draft || (a.kind === 'files' && !a.submission)) && <Button type="primary" onClick={() => setPublishing(true)}>{K.isIndex(a) ? t('rv.enableRemoteIndex') : t('rv.submitPr')}</Button>}</Space>} />
     <div className={'wb-body' + (files.length ? '' : ' no-files')}>
       {files.length > 0 && <FileList current={file} onSelect={setFile} groups={K.fileGroups(a, files).map(g => ({ title: g.title, items: g.items.map(f => ({ key: f, indent: !!g.title, label: <>{K.fileLabel(f)}{mark(f)}</> })) }))} />}
       <section className="wb-main">
         {comparable && <div className="wb-toolbar">
-          <Segmented value={tab} onChange={v => setTab(v as typeof tab)} options={[{ value: 'content', label: '内容' }, { value: 'diff', label: '与上次版本（v' + a.published!.version + '）对比' }]} />
+          <Segmented value={tab} onChange={v => setTab(v as typeof tab)} options={[{ value: 'content', label: t('rv.content') }, { value: 'diff', label: t('rv.diffAgainst', { version: a.published!.version }) }]} />
         </div>}
         <div className="wb-view" key={file + tab} onClick={e => { const target = file && linkTarget(e, file); if (target && a.files?.includes(target)) setFile(target); }}>{main}</div>
       </section>
       <aside className="wb-side"><div className="side-body">
         {!a.draft ? <PublishedSide st={st} a={a} /> : <>
-          <h3>{a.published ? '新版本待审阅' : '待审阅'}</h3>
-          <Fields rows={[['生成于', when(a.draft.created)], basisRow(st, a, a.draft.basis), !!a.published && ['上次版本', 'v' + a.published.version + '，生成于 ' + when(a.published.at)]]} />
+          <h3>{a.published ? t('ui.newVersionDraft') : t('ui.draft')}</h3>
+          <Fields rows={[[t('rv.generatedAt'), when(a.draft.created)], basisRow(st, a, a.draft.basis), !!a.published && [t('rv.lastVersion'), t('rv.lastVersionValue', { version: a.published.version, time: when(a.published.at) })]]} />
         </>}
       </div></aside>
     </div>
@@ -132,10 +137,11 @@ export function Workbench({ id }: { id: string }) {
 
 function PublishedSide({ st, a }: { st: TalentsState; a: Artifact }) {
   const { go } = useTalents();
+  const t = useT();
   const p = a.published!, stale = staleChanges(st, a);
-  return <><h3>{K.isIndex(a) ? '远端索引' : a.submission ? 'PR 已创建' : '已有版本'}</h3>
-    <Fields rows={[[ '版本', 'v' + p.version], ['生成于', p.at], basisRow(st, a, p.basis), ['更新说明', p.note]]} />
+  return <><h3>{K.isIndex(a) ? t('ui.remoteIndex') : a.submission ? t('ui.prCreated') : t('ui.hasVersion')}</h3>
+    <Fields rows={[[t('rv.version'), 'v' + p.version], [t('rv.generatedAt'), p.at], basisRow(st, a, p.basis), [t('rv.updateNote'), p.note]]} />
     {a.submission && <SubmissionLink submission={a.submission} />}
-    {stale && <><StaleNote st={st} a={a} c={stale} /><div className="actions"><Button onClick={() => go(reExtractHash(a))}>重新提取</Button></div></>}
+    {stale && <><StaleNote st={st} a={a} c={stale} /><div className="actions"><Button onClick={() => go(reExtractHash(a))}>{t('rv.reExtract')}</Button></div></>}
   </>;
 }

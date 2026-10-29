@@ -3,8 +3,10 @@ import { useMemo, useState } from 'react';
 import { Button, Checkbox, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
 import { TeamsPageIntro } from '../components/teams-reuse.js';
 import { useDemo } from '../context.js';
+import { useT } from '../i18n.js';
+import { currentT, type MessageKey } from '../../../shared/i18n/index.js';
 import { FrameworkCard } from '../vendor/teams/components/page-layout.js';
-import { presence, teamUsage, type DemoMember, type Presence } from '../operations.js';
+import { presence, presenceLabel, teamUsage, type DemoMember, type Presence } from '../operations.js';
 import { teamWorkIndex, type TeamWorkEntry } from '../project-overview.js';
 import { RequirementDetail, requirementPhaseLabel } from '../components/requirement-detail.js';
 import { TaskSessions } from '../components/task-sessions.js';
@@ -14,35 +16,47 @@ import { canLinkTaskSession, type CollectedSession, type TaskScope } from '../ta
 import '../operations.css';
 
 const colors: Partial<Record<Presence, string>> = { '执行中': 'green', '等待人工处理': 'gold', '在线空闲': 'blue' };
-const activityLabels = { started: '已开始', progress: '进度回传', blocked: '报告阻塞', result: '成果待确认' } as const;
-const knowledgeLabels = { 'waiting-upstream': '等待上游', queued: '待导入', running: '导入中', ready: '导入完成', waiting: '等待输入就绪', failed: '导入未完成' } as const;
-const collectionLabels = { queued: '等待归集', running: '正在归集', collected: '已归集', empty: '暂无会话', failed: '归集未完成' } as const;
-const conversationNodeLabels = { develop: '功能开发', verify: '测试验证' } as const;
+// Status vocabularies are module-level, so getters keep `labels[key]`, Object.keys and Object.hasOwn
+// working while every read still resolves against the ambient locale.
+function labelGetters<K extends string>(keys: Record<K, MessageKey>): Record<K, string> {
+  return Object.defineProperties({} as Record<K, string>, Object.fromEntries(
+    (Object.keys(keys) as K[]).map(key => [key, { get: () => currentT(keys[key]), enumerable: true }]),
+  ));
+}
+const activityLabels = labelGetters({ started: 'tw.activity.started', progress: 'tw.activity.progress', blocked: 'tw.activity.blocked', result: 'tw.activity.result' } as const);
+const knowledgeLabels = labelGetters({ 'waiting-upstream': 'tw.knowledge.waitingUpstream', queued: 'tw.knowledge.queued', running: 'tw.knowledge.running', ready: 'tw.knowledge.ready', waiting: 'tw.knowledge.waiting', failed: 'tw.knowledge.failed' } as const);
+const collectionLabels = labelGetters({ queued: 'tw.collection.queued', running: 'tw.collection.running', collected: 'tw.collection.collected', empty: 'tw.collection.empty', failed: 'tw.collection.failed' } as const);
+const conversationNodeLabels = labelGetters({ develop: 'tw.node.develop', verify: 'tw.node.verify' } as const);
+/** Session node ids are plain strings; unknown ids keep the development label. */
+const conversationNodeLabel = (node: string) => node === 'verify' ? conversationNodeLabels.verify : conversationNodeLabels.develop;
 type ConversationNode = keyof typeof conversationNodeLabels;
 type ConversationRow = CollectedSession & { id: string; entry: TeamWorkEntry };
 
 export function MemberUsageTable() {
   const { state } = useDemo();
+  const t = useT();
   return <Table<DemoMember> size="middle" rowKey="id" pagination={false} dataSource={teamUsage(state)} scroll={{ x: 720 }}
     expandable={{ rowExpandable: row => row.instances.length > 0, expandedRowRender: row => <div className="instance-list">{row.instances.map(instance => <Descriptions key={instance.id} size="small" column={2} items={[
-      { key: 'id', label: '执行实例', children: instance.id }, { key: 'state', label: '状态', children: <Tag color={colors[instance.state]}>{instance.state}</Tag> },
-      { key: 'task', label: '任务', children: instance.task }, { key: 'project', label: '项目', children: instance.project },
+      { key: 'id', label: t('tw.instanceLabel'), children: instance.id }, { key: 'state', label: t('tw.stateLabel'), children: <Tag color={colors[instance.state]}>{presenceLabel(instance.state)}</Tag> },
+      { key: 'task', label: t('tw.taskLabel'), children: instance.task }, { key: 'project', label: t('common.project'), children: instance.project },
     ]} />)}</div> }}
     columns={[
-      { title: '成员', dataIndex: 'name', width: 100 },
-      { title: '运行状态', width: 140, render: (_, row) => <Tag color={colors[presence(row)]}>{presence(row)}</Tag> },
-      { title: '当前任务 / 项目', render: (_, row) => <div className="member-task"><strong>{row.instances[0]?.task ?? '尚未使用 iCode'}</strong><small>{row.instances[0]?.project ?? '—'}</small></div> },
-      { title: '最近活跃', dataIndex: 'lastActive', width: 130 },
+      { title: t('tw.memberColumn'), dataIndex: 'name', width: 100 },
+      { title: t('tw.runtimeColumn'), width: 140, render: (_, row) => <Tag color={colors[presence(row)]}>{presenceLabel(presence(row))}</Tag> },
+      { title: t('tw.currentTaskColumn'), render: (_, row) => <div className="member-task"><strong>{row.instances[0]?.task ?? t('tw.notUsed')}</strong><small>{row.instances[0]?.project ?? '—'}</small></div> },
+      { title: t('tw.lastActiveColumn'), dataIndex: 'lastActive', width: 130 },
     ]} />;
 }
 
 function SourceTags({ entry }: { entry: TeamWorkEntry }) {
-  return <Space wrap><Tag color={entry.projectId === 'teams' ? 'blue' : 'purple'}>{entry.projectId === 'teams' ? '导入快照' : entry.item.source.origin === 'teams-task' ? 'Teams 任务' : '当前工作流'}</Tag>{entry.item.activity && <Tag color="green">本机回传</Tag>}{entry.item.source.requirement?.category === 'research' && <Tag>调研</Tag>}</Space>;
+  const t = useT();
+  return <Space wrap><Tag color={entry.projectId === 'teams' ? 'blue' : 'purple'}>{entry.projectId === 'teams' ? t('tw.snapshotTag') : entry.item.source.origin === 'teams-task' ? t('tw.teamsTaskTag') : t('tw.currentFlowTag')}</Tag>{entry.item.activity && <Tag color="green">{t('tw.localReportTag')}</Tag>}{entry.item.source.requirement?.category === 'research' && <Tag>{t('tw.researchTag')}</Tag>}</Space>;
 }
-const ownerLabel = (entry: TeamWorkEntry) => entry.projectId === 'teams' ? '快照责任人 · ' + entry.item.owner : entry.item.owner;
+const ownerLabel = (entry: TeamWorkEntry) => entry.projectId === 'teams' ? currentT('tw.snapshotOwner', { name: entry.item.owner }) : entry.item.owner;
 
 export function TeamWork() {
   const { navigate, state, data, role, update, busy } = useDemo();
+  const t = useT();
   const [project, setProject] = useState('all'), [owner, setOwner] = useState('all'), [phase, setPhase] = useState('all');
   const [selected, setSelected] = useState<TeamWorkEntry | null>(null), [includeSnapshots, setIncludeSnapshots] = useState(false);
   const [reportOpen, setReportOpen] = useState(false), [reportTaskId, setReportTaskId] = useState<string>();
@@ -78,46 +92,46 @@ export function TeamWork() {
     const first = reportable[0]; if (!first) return;
     setReportTaskId(first.id); reportForm.resetFields(); reportForm.setFieldsValue({ task: first.id, nodeId: reportNodes(first)[0], tool: 'icode', sessionId: '' }); setReportOpen(true);
   };
-  const filters = <div className="team-work-filters"><Space wrap><Select aria-label="筛选追溯项目" value={project} onChange={setProject} options={[{ value: 'all', label: '全部项目' }, ...projects.map(([value, label]) => ({ value, label }))]} /><Select aria-label="筛选交付人" value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部交付人' }, ...owners.map(value => ({ value, label: entries.find(entry => entry.item.owner === value)?.projectId === 'teams' ? '快照责任人 · ' + value : value }))]} /><Select aria-label="筛选交付阶段" value={phase} onChange={setPhase} options={[{ value: 'all', label: '全部阶段' }, ...(['待开展', '准备', '开发', '验证', '待验收', '已交付'] as const).map(value => ({ value, label: requirementPhaseLabel(value) }))]} />{role === 'owner' && <Checkbox checked={includeSnapshots} onChange={event => { setIncludeSnapshots(event.target.checked); if (!event.target.checked) { setProject('all'); setOwner('all'); } }}>显示导入快照</Checkbox>}</Space><span>{visible.length} / {entries.length} 项任务</span></div>;
-  return <div className="page-stack team-work-page"><TeamsPageIntro actions={<Tag>{entries.length} 项任务</Tag>}>统一查看任务交付进展和原生会话内容；导入快照按需展开并独立标识。</TeamsPageIntro>
+  const filters = <div className="team-work-filters"><Space wrap><Select aria-label={t('tw.filterProject')} value={project} onChange={setProject} options={[{ value: 'all', label: t('tw.allProjects') }, ...projects.map(([value, label]) => ({ value, label }))]} /><Select aria-label={t('tw.filterOwner')} value={owner} onChange={setOwner} options={[{ value: 'all', label: t('tw.allOwners') }, ...owners.map(value => ({ value, label: entries.find(entry => entry.item.owner === value)?.projectId === 'teams' ? t('tw.snapshotOwner', { name: value }) : value }))]} /><Select aria-label={t('tw.filterPhase')} value={phase} onChange={setPhase} options={[{ value: 'all', label: t('tw.allPhases') }, ...(['待开展', '准备', '开发', '验证', '待验收', '已交付'] as const).map(value => ({ value, label: requirementPhaseLabel(value) }))]} />{role === 'owner' && <Checkbox checked={includeSnapshots} onChange={event => { setIncludeSnapshots(event.target.checked); if (!event.target.checked) { setProject('all'); setOwner('all'); } }}>{t('tw.showSnapshots')}</Checkbox>}</Space><span>{t('tw.taskRatio', { visible: visible.length, total: entries.length })}</span></div>;
+  return <div className="page-stack team-work-page"><TeamsPageIntro actions={<Tag>{t('tw.taskCount', { count: entries.length })}</Tag>}>{t('tw.intro')}</TeamsPageIntro>
     <Tabs activeKey={activeTab} onChange={value => changeRoute(value)} items={[
-      { key: 'tasks', label: '任务作业', children: <>{filters}<FrameworkCard title="跨任务作业索引"><Table<TeamWorkEntry> rowKey="id" size="middle" pagination={false} scroll={{ x: 1120 }} dataSource={visible} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选没有任务作业" /> }} columns={[
-        { title: '项目 / 需求', width: 270, render: (_, entry) => <div className="team-work-cell"><strong>{entry.projectName}</strong><span>{displayText(entry.item.source.title)}</span><small>{displayRequirementId(entry.scope.taskId)}</small></div> },
-        { title: includeSnapshots ? '交付人 / 来源责任人' : '交付人', width: includeSnapshots ? 180 : 105, render: (_, entry) => ownerLabel(entry) },
-        { title: '交付阶段', width: 115, render: (_, entry) => <Tag color={entry.item.phase === '已交付' ? 'green' : entry.item.phase === '待验收' ? 'gold' : undefined}>{requirementPhaseLabel(entry.item.phase)}</Tag> },
-        { title: '最近回传', render: (_, entry) => <div className="team-work-cell"><span>{entry.item.activity ? activityLabels[entry.item.activity.phase] : '未回传'}</span><small>{entry.item.activity ? displayText(entry.item.activity.summary) : '尚无此任务的本机回传'}</small></div> },
-        { title: '会话 / 自动化', width: 175, render: (_, entry) => <div className="team-work-cell"><span>{entry.sessions.length} 个会话</span><small>{entry.automation?.collection ? collectionLabels[entry.automation.collection.status] : entry.automation?.knowledge ? '知识导入 · ' + knowledgeLabels[entry.automation.knowledge.status] : '未触发自动归集'}</small></div> },
-        { title: '来源', width: 155, render: (_, entry) => <SourceTags entry={entry} /> },
-        { title: '操作', width: 95, render: (_, entry) => <Button type="link" size="small" onClick={() => setSelected(entry)}>查看详情</Button> },
+      { key: 'tasks', label: t('tw.tabTasks'), children: <>{filters}<FrameworkCard title={t('tw.indexTitle')}><Table<TeamWorkEntry> rowKey="id" size="middle" pagination={false} scroll={{ x: 1120 }} dataSource={visible} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('tw.emptyTasks')} /> }} columns={[
+        { title: t('tw.colProject'), width: 270, render: (_, entry) => <div className="team-work-cell"><strong>{entry.projectName}</strong><span>{displayText(entry.item.source.title)}</span><small>{displayRequirementId(entry.scope.taskId)}</small></div> },
+        { title: includeSnapshots ? t('tw.colOwnerSource') : t('tw.colOwner'), width: includeSnapshots ? 180 : 105, render: (_, entry) => ownerLabel(entry) },
+        { title: t('tw.colPhase'), width: 115, render: (_, entry) => <Tag color={entry.item.phase === '已交付' ? 'green' : entry.item.phase === '待验收' ? 'gold' : undefined}>{requirementPhaseLabel(entry.item.phase)}</Tag> },
+        { title: t('tw.colLastReport'), render: (_, entry) => <div className="team-work-cell"><span>{entry.item.activity ? activityLabels[entry.item.activity.phase] : t('tw.noReport')}</span><small>{entry.item.activity ? displayText(entry.item.activity.summary) : t('tw.noReportHint')}</small></div> },
+        { title: t('tw.colSessions'), width: 175, render: (_, entry) => <div className="team-work-cell"><span>{t('tw.sessionCount', { count: entry.sessions.length })}</span><small>{entry.automation?.collection ? collectionLabels[entry.automation.collection.status] : entry.automation?.knowledge ? t('tw.knowledgeStatus', { status: knowledgeLabels[entry.automation.knowledge.status] }) : t('tw.noAutomation')}</small></div> },
+        { title: t('tw.colSource'), width: 155, render: (_, entry) => <SourceTags entry={entry} /> },
+        { title: t('tw.colActions'), width: 95, render: (_, entry) => <Button type="link" size="small" onClick={() => setSelected(entry)}>{t('tw.viewDetails')}</Button> },
       ]} /></FrameworkCard></> },
-      { key: 'sessions', label: '任务会话', children: <div className="team-work-session-view">
-        <div className="team-work-session-toolbar"><Space wrap><Button aria-label="上报任务会话" onClick={openReport} disabled={!reportable.length} title={reportable.length ? '关联本机已有会话并查看正文' : '当前筛选中没有可由你上报的进行中任务'}>上报会话</Button></Space><span>选择会话查看用户输入与模型回复。</span></div>
+      { key: 'sessions', label: t('tw.sessionsTitle'), children: <div className="team-work-session-view">
+        <div className="team-work-session-toolbar"><Space wrap><Button aria-label={t('tw.reportSessionAria')} onClick={openReport} disabled={!reportable.length} title={reportable.length ? t('tw.reportHint') : t('tw.reportDisabled')}>{t('tw.reportSession')}</Button></Space><span>{t('tw.sessionPickHint')}</span></div>
         <div className="team-work-conversation-view">{filters}<div className="team-work-conversation-layout">
-          <FrameworkCard title="任务会话" action={<Tag>{sessionRows.length} 个</Tag>}><div className="team-work-session-list">{sessionRows.length ? sessionRows.map(row => <button type="button" key={row.id} data-conversation-session={row.sessionId} aria-pressed={selectedSession?.id === row.id} className={'team-work-session-item' + (selectedSession?.id === row.id ? ' selected' : '')} onClick={() => selectConversation(row)}>
+          <FrameworkCard title={t('tw.sessionsTitle')} action={<Tag>{t('tw.sessionRowCount', { count: sessionRows.length })}</Tag>}><div className="team-work-session-list">{sessionRows.length ? sessionRows.map(row => <button type="button" key={row.id} data-conversation-session={row.sessionId} aria-pressed={selectedSession?.id === row.id} className={'team-work-session-item' + (selectedSession?.id === row.id ? ' selected' : '')} onClick={() => selectConversation(row)}>
             <span className="team-work-session-item-heading"><Tag>{row.tool}</Tag><strong>{displayText(row.entry.item.source.title)}</strong></span>
             <small>{row.entry.projectName} · {displayRequirementId(row.entry.scope.taskId)}</small><code title={row.sessionId}>{row.sessionId}</code>
-            <span className="team-work-session-item-meta"><span>{row.nodeIds.map(node => node === 'verify' ? '测试验证' : '功能开发').join(' / ')}</span><time dateTime={row.lastAt}>{new Date(row.lastAt).toLocaleString('zh-CN', { hour12: false })}</time></span>
-          </button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选没有任务会话" />}</div></FrameworkCard>
-          <FrameworkCard title="真实对话正文" action={selectedSession ? <Tag>{conversationNodeLabels[selectedNode]}</Tag> : undefined}>{selectedSession ? <>
-            <div className="team-work-conversation-context"><div><strong>{displayText(selectedSession.entry.item.source.title)}</strong><span>{selectedSession.entry.projectName} · {displayRequirementId(selectedSession.entry.scope.taskId)}</span><code title={selectedSession.sessionId}>{selectedSession.tool} · {selectedSession.sessionId}</code></div><Select aria-label="选择会话节点" value={selectedNode} onChange={node => selectConversation(selectedSession, node)} options={selectedSession.nodeIds.map(node => ({ value: node, label: node === 'verify' ? '测试验证' : '功能开发' }))} /></div>
+            <span className="team-work-session-item-meta"><span>{row.nodeIds.map(node => conversationNodeLabel(node)).join(' / ')}</span><time dateTime={row.lastAt}>{new Date(row.lastAt).toLocaleString('zh-CN', { hour12: false })}</time></span>
+          </button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('tw.emptySessions')} />}</div></FrameworkCard>
+          <FrameworkCard title={t('tw.conversationTitle')} action={selectedSession ? <Tag>{conversationNodeLabels[selectedNode]}</Tag> : undefined}>{selectedSession ? <>
+            <div className="team-work-conversation-context"><div><strong>{displayText(selectedSession.entry.item.source.title)}</strong><span>{selectedSession.entry.projectName} · {displayRequirementId(selectedSession.entry.scope.taskId)}</span><code title={selectedSession.sessionId}>{selectedSession.tool} · {selectedSession.sessionId}</code></div><Select aria-label={t('tw.pickNode')} value={selectedNode} onChange={node => selectConversation(selectedSession, node)} options={selectedSession.nodeIds.map(node => ({ value: node, label: conversationNodeLabel(node) }))} /></div>
             {activeTab === 'sessions' && <TaskSessionActivity key={selectedSession.id + ':' + selectedNode} projectId={selectedSession.entry.scope.projectId} taskId={selectedSession.entry.scope.taskId} nodeId={selectedNode} sessionId={selectedSession.sessionId} showSessionSelector={false} readonlySource={selectedSession.entry.projectId === 'teams'} />}
-          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={requestedSession ? '所选会话不在当前筛选范围或已不可用' : sessionRows.length ? '选择左侧会话查看真实对话正文' : '当前筛选没有可读取的原生会话'} />}</FrameworkCard>
+          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={requestedSession ? t('tw.sessionUnavailable') : sessionRows.length ? t('tw.sessionPick') : t('tw.noNativeSession')} />}</FrameworkCard>
         </div></div>
       </div> },
-      ...(role === 'owner' ? [{ key: 'members', label: '成员运行概览', children: <FrameworkCard title="成员与执行实例" action={<Tag>运营样例</Tag>}><MemberUsageTable /><p className="muted">展开成员行可查看实例。此处不用于跨成员实时状态或交付追溯；本机实际状态请在 Agent 管理中核验。</p></FrameworkCard> }] : []),
+      ...(role === 'owner' ? [{ key: 'members', label: t('tw.tabMembers'), children: <FrameworkCard title={t('tw.membersTitle')} action={<Tag>{t('tw.sampleTag')}</Tag>}><MemberUsageTable /><p className="muted">{t('tw.membersNote')}</p></FrameworkCard> }] : []),
     ]} />
-    <Drawer title={selectedEntry?.item.source.title ?? '任务详情'} width={820} open={!!selectedEntry} onClose={() => setSelected(null)} destroyOnHidden>{selectedEntry && <div className="page-stack"><SourceTags entry={selectedEntry} /><RequirementDetail projectId={selectedEntry.projectId} item={selectedEntry.item} />{selectedEntry.projectId !== 'teams' && <>
-      {selectedEntry.automation && <FrameworkCard title="自动化与 Talents 共享"><Descriptions column={1} size="small" items={[{ key: 'knowledge', label: '知识导入', children: selectedEntry.automation.knowledge ? knowledgeLabels[selectedEntry.automation.knowledge.status] : '未触发' }, { key: 'collection', label: '验收后归集', children: selectedEntry.automation.collection ? collectionLabels[selectedEntry.automation.collection.status] : '未触发' }, { key: 'reporting', label: 'Talents 共享', children: selectedEntry.automation.collection?.reporting?.status === 'reported' ? '已共享 · ' + selectedEntry.automation.collection.reporting.receipt?.id : selectedEntry.automation.collection?.reporting?.reason ?? '尚未共享' }]} /></FrameworkCard>}
+    <Drawer title={selectedEntry?.item.source.title ?? t('tw.taskDetail')} width={820} open={!!selectedEntry} onClose={() => setSelected(null)} destroyOnHidden>{selectedEntry && <div className="page-stack"><SourceTags entry={selectedEntry} /><RequirementDetail projectId={selectedEntry.projectId} item={selectedEntry.item} />{selectedEntry.projectId !== 'teams' && <>
+      {selectedEntry.automation && <FrameworkCard title={t('tw.automationTitle')}><Descriptions column={1} size="small" items={[{ key: 'knowledge', label: t('tw.knowledgeLabel'), children: selectedEntry.automation.knowledge ? knowledgeLabels[selectedEntry.automation.knowledge.status] : t('tw.notTriggered') }, { key: 'collection', label: t('tw.collectionLabel'), children: selectedEntry.automation.collection ? collectionLabels[selectedEntry.automation.collection.status] : t('tw.notTriggered') }, { key: 'reporting', label: t('tw.talentsShare'), children: selectedEntry.automation.collection?.reporting?.status === 'reported' ? t('tw.shared', { id: selectedEntry.automation.collection.reporting.receipt?.id ?? '' }) : selectedEntry.automation.collection?.reporting?.reason ?? t('tw.notShared') }]} /></FrameworkCard>}
       <TaskSessions readonly scope={selectedEntry.scope} /><CollaborationProgress projectId={selectedEntry.scope.projectId} taskId={selectedEntry.scope.taskId} />
-    </>}{selectedEntry.scope.projectId === 'carddemo' && selectedEntry.scope.taskId === 'DEMO-MKT-001' && <Button onClick={() => navigate('trace')}>打开主任务交付记录</Button>}</div>}</Drawer>
-    <Modal title="上报并查看任务会话" open={reportOpen && reportable.length > 0} onCancel={() => setReportOpen(false)} okText="上报并查看" cancelText="取消" confirmLoading={busy} okButtonProps={{ 'aria-label': '确认上报会话', disabled: busy }} cancelButtonProps={{ disabled: busy }} closable={!busy} maskClosable={!busy} onOk={() => reportForm.submit()}>
+    </>}{selectedEntry.scope.projectId === 'carddemo' && selectedEntry.scope.taskId === 'DEMO-MKT-001' && <Button onClick={() => navigate('trace')}>{t('tw.openMainRecord')}</Button>}</div>}</Drawer>
+    <Modal title={t('tw.reportTitle')} open={reportOpen && reportable.length > 0} onCancel={() => setReportOpen(false)} okText={t('tw.reportOk')} cancelText={t('common.cancel')} confirmLoading={busy} okButtonProps={{ 'aria-label': t('tw.reportConfirmAria'), disabled: busy }} cancelButtonProps={{ disabled: busy }} closable={!busy} maskClosable={!busy} onOk={() => reportForm.submit()}>
       <Form form={reportForm} layout="vertical" disabled={busy} onFinish={async values => { const entry = reportable.find(item => item.id === values.task); if (!entry) return; const result = await update('session.link', { ...entry.scope, nodeId: values.nodeId, tool: values.tool, sessionId: values.sessionId }); if (result) { setReportOpen(false); openConversation(entry.scope, values.nodeId, values.sessionId.trim()); } }}>
-        <Form.Item name="task" label="任务" rules={[{ required: true, message: '请选择任务' }]}><Select aria-label="上报任务" value={reportTaskId} onChange={value => { setReportTaskId(value); const entry = reportable.find(item => item.id === value); if (entry) reportForm.setFieldValue('nodeId', reportNodes(entry)[0]); }} options={reportable.map(entry => ({ value: entry.id, label: entry.projectName + ' · ' + displayText(entry.item.source.title) + ' · ' + ownerLabel(entry) }))} /></Form.Item>
-        <Form.Item name="nodeId" label="节点" rules={[{ required: true, message: '请选择节点' }]}><Select aria-label="上报节点" options={(reportEntry ? reportNodes(reportEntry) : []).map(node => ({ value: node, label: conversationNodeLabels[node] }))} /></Form.Item>
-        <Form.Item name="tool" label="工具" rules={[{ required: true, message: '请选择工具' }]}><Select aria-label="上报会话工具" options={[{ value: 'icode', label: 'iCode' }, { value: 'opencode', label: 'OpenCode' }]} /></Form.Item>
-        <Form.Item name="sessionId" label="本机会话标识" rules={[{ required: true, whitespace: true, message: '请输入本机会话标识' }]}><Input aria-label="上报会话标识" maxLength={200} placeholder="输入 iCode / OpenCode 已有 sessionId" /></Form.Item>
+        <Form.Item name="task" label={t('tw.taskLabel')} rules={[{ required: true, message: t('tw.chooseTask') }]}><Select aria-label={t('tw.reportTaskAria')} value={reportTaskId} onChange={value => { setReportTaskId(value); const entry = reportable.find(item => item.id === value); if (entry) reportForm.setFieldValue('nodeId', reportNodes(entry)[0]); }} options={reportable.map(entry => ({ value: entry.id, label: entry.projectName + ' · ' + displayText(entry.item.source.title) + ' · ' + ownerLabel(entry) }))} /></Form.Item>
+        <Form.Item name="nodeId" label={t('tw.fieldNode')} rules={[{ required: true, message: t('tw.chooseNode') }]}><Select aria-label={t('tw.reportNodeAria')} options={(reportEntry ? reportNodes(reportEntry) : []).map(node => ({ value: node, label: conversationNodeLabels[node] }))} /></Form.Item>
+        <Form.Item name="tool" label={t('tw.fieldTool')} rules={[{ required: true, message: t('tw.chooseTool') }]}><Select aria-label={t('tw.reportToolAria')} options={[{ value: 'icode', label: 'iCode' }, { value: 'opencode', label: 'OpenCode' }]} /></Form.Item>
+        <Form.Item name="sessionId" label={t('tw.fieldSessionId')} rules={[{ required: true, whitespace: true, message: t('tw.enterSessionId') }]}><Input aria-label={t('tw.reportSessionIdAria')} maxLength={200} placeholder={t('tw.sessionIdPlaceholder')} /></Form.Item>
       </Form>
-      <p className="muted">仅当前交付人可在开发或验证阶段关联本机已有会话。提交不会启动工具或伪造正文；原生记录可读取后才会显示对话。</p>
+      <p className="muted">{t('tw.reportNote')}</p>
     </Modal>
   </div>;
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Descriptions, Modal, Select, Space, Spin } from 'antd';
 import { applySkillApplication, getSkillApplication } from '../api.js';
 import { useDemo } from '../context.js';
+import { useT } from '../i18n.js';
 import { currentSystemContext } from '../system-links.js';
 
 type Plan = Awaited<ReturnType<typeof getSkillApplication>>;
@@ -10,6 +11,7 @@ type Receipt = Awaited<ReturnType<typeof applySkillApplication>>;
 /** Subscription installation is separate from the task's selected and frozen inputs. */
 export function SkillApplication({ resourceId, version, sha256, projectId: initialProject }: { resourceId: string; version: string; sha256: string; projectId?: string }) {
   const { state, data, role } = useDemo();
+  const t = useT();
   const [open, setOpen] = useState(false), [projectId, setProjectId] = useState(initialProject ?? currentSystemContext().projectId);
   const [plan, setPlan] = useState<Plan>(), [receipt, setReceipt] = useState<Receipt>();
   const [receiptDetails, setReceiptDetails] = useState(false);
@@ -18,6 +20,7 @@ export function SkillApplication({ resourceId, version, sha256, projectId: initi
   const scopeKey = `${role}:${projectId}:${resourceId}:${version}:${sha256}`;
   const activeScope = useRef(scopeKey); activeScope.current = scopeKey;
   const projects = [{ value: 'carddemo', label: state.workspace.project.name }, { value: 'teams', label: data.teamsProject.project.name }, ...(state.workspace.projects ?? []).map(project => ({ value: project.id, label: project.name }))];
+  const userName = state.workspace.team.members.find(item => item.id === role)?.name ?? '';
   useEffect(() => { setOpen(false); setReceipt(undefined); }, [role, resourceId, version, sha256]);
   useEffect(() => {
     if (!open) return;
@@ -37,16 +40,16 @@ export function SkillApplication({ resourceId, version, sha256, projectId: initi
     finally { if (activeScope.current === key) setApplying(false); }
   };
   return <>
-    <Button size="small" data-skill-apply={resourceId} aria-label={'应用到 iCode：' + resourceId} onClick={() => setOpen(true)}>应用到 iCode</Button>
-    <Modal title={resourceId + ' · 应用到本机用户 iCode'} open={open} width={680} closable={!applying} maskClosable={!applying} onCancel={() => setOpen(false)} footer={receipt ? <Button type="primary" aria-label="完成" onClick={() => setOpen(false)}>完成</Button> : <Space><Button aria-label="取消" disabled={applying} onClick={() => setOpen(false)}>取消</Button><Button type="primary" data-skill-apply-confirm loading={applying} disabled={loading || !plan?.canApply} onClick={() => void apply()}>{error && plan ? '重试同一应用请求' : '应用到本机用户 iCode'}</Button></Space>}>
+    <Button size="small" data-skill-apply={resourceId} aria-label={t('res.applyAria', { name: resourceId })} onClick={() => setOpen(true)}>{t('res.apply')}</Button>
+    <Modal title={t('res.applyTitle', { name: resourceId })} open={open} width={680} closable={!applying} maskClosable={!applying} onCancel={() => setOpen(false)} footer={receipt ? <Button type="primary" aria-label={t('res.done')} onClick={() => setOpen(false)}>{t('res.done')}</Button> : <Space><Button aria-label={t('common.cancel')} disabled={applying} onClick={() => setOpen(false)}>{t('common.cancel')}</Button><Button type="primary" data-skill-apply-confirm loading={applying} disabled={loading || !plan?.canApply} onClick={() => void apply()}>{error && plan ? t('res.applyRetry') : t('res.applyConfirm')}</Button></Space>}>
       <div className="page-stack">
-        <p>将当前用户订阅的固定版本写入本机用户 iCode Skill 目录，供不同项目使用，并核验发现与读取情况。此操作不更改已冻结的任务上下文，也不会启动模型。</p>
-        <p className="muted">角色切换不会切换操作系统用户。本机用户安装目录共享，但不会自动替其他角色订阅；来源项目仅用于记录本次应用上下文。</p>
-        <Select aria-label="Skill 应用来源项目" value={projectId} options={projects} disabled={applying || !!receipt} onChange={setProjectId} />
-        {loading && <Spin tip="核验订阅版本与目标目录"><div style={{ minHeight: 48 }} /></Spin>}
-        {error && <Alert type="error" showIcon title="Skill 应用未完成" description={error} action={!plan && <Button onClick={() => setRetry(value => value + 1)}>重新核验</Button>} />}
-        {plan && !receipt && <><Descriptions column={1} size="small" items={[{ key: 'user', label: '订阅用户', children: role === 'owner' ? '林悦' : '陈晨' }, { key: 'version', label: '订阅版本', children: version }, { key: 'project', label: '来源项目', children: plan.projectName }, { key: 'directory', label: '本机用户 Skill 目录', children: <code style={{ overflowWrap: 'anywhere' }}>{plan.targetDirectory || '尚未确认'}</code> }, { key: 'skill', label: '应用路径', children: <code style={{ overflowWrap: 'anywhere' }}>{plan.skillDirectory || '待目录核验'}</code> }, { key: 'sha', label: 'Skill 包 SHA-256', children: <code style={{ overflowWrap: 'anywhere' }}>{sha256}</code> }]} />{!plan.canApply && <Alert type="warning" title="当前不能应用" description={plan.reason} />}</>}
-        {receipt && <><Alert type={receipt.discovery.status === 'discovered-and-read' ? 'success' : 'warning'} showIcon title={receipt.status === 'already-applied' ? '此版本已应用' : 'Skill 文件已应用'} description={receipt.note} /><Descriptions column={1} size="small" items={[{ key: 'version', label: '应用版本', children: receipt.version }, { key: 'directory', label: '本机用户 Skill 目录', children: <code style={{ overflowWrap: 'anywhere' }}>{receipt.targetDirectory}</code> }, { key: 'path', label: 'Skill 路径', children: <code style={{ overflowWrap: 'anywhere' }}>{receipt.skillDirectory}</code> }, { key: 'discovery', label: 'iCode 发现核验', children: receipt.discovery.status === 'discovered-and-read' ? '已发现并读取' : receipt.discovery.status === 'failed' ? '核验失败' : '未核验' }, { key: 'hash', label: 'Skill 包 SHA-256', children: <code style={{ overflowWrap: 'anywhere' }}>{receipt.sha256}</code> }]} /><Button aria-expanded={receiptDetails} onClick={() => setReceiptDetails(value => !value)}>查看完整应用回执</Button>{receiptDetails && <pre className="evidence-console" data-skill-application-receipt style={{ maxHeight: 280, overflow: 'auto' }}>{JSON.stringify(receipt, null, 2)}</pre>}<p>{receipt.discovery.note}</p><p className="muted">文件应用与工具发现不代表当前运行中的会话已重新加载，也不代表模型已执行该 Skill。</p></>}
+        <p>{t('res.applyNote')}</p>
+        <p className="muted">{t('res.applyUsersNote')}</p>
+        <Select aria-label={t('res.applyProjectAria')} value={projectId} options={projects} disabled={applying || !!receipt} onChange={setProjectId} />
+        {loading && <Spin tip={t('res.applyVerifying')}><div style={{ minHeight: 48 }} /></Spin>}
+        {error && <Alert type="error" showIcon title={t('res.applyFailed')} description={error} action={!plan && <Button onClick={() => setRetry(value => value + 1)}>{t('res.applyReverify')}</Button>} />}
+        {plan && !receipt && <><Descriptions column={1} size="small" items={[{ key: 'user', label: t('res.applyUser'), children: userName }, { key: 'version', label: t('res.applyVersion'), children: version }, { key: 'project', label: t('res.applyProject'), children: plan.projectName }, { key: 'directory', label: t('res.applyDirectory'), children: <code style={{ overflowWrap: 'anywhere' }}>{plan.targetDirectory || t('res.applyUnconfirmed')}</code> }, { key: 'skill', label: t('res.applyPath'), children: <code style={{ overflowWrap: 'anywhere' }}>{plan.skillDirectory || t('res.applyPathPending')}</code> }, { key: 'sha', label: t('res.applyHash'), children: <code style={{ overflowWrap: 'anywhere' }}>{sha256}</code> }]} />{!plan.canApply && <Alert type="warning" title={t('res.applyBlocked')} description={plan.reason} />}</>}
+        {receipt && <><Alert type={receipt.discovery.status === 'discovered-and-read' ? 'success' : 'warning'} showIcon title={receipt.status === 'already-applied' ? t('res.appliedAlready') : t('res.appliedFiles')} description={receipt.note} /><Descriptions column={1} size="small" items={[{ key: 'version', label: t('res.appliedVersion'), children: receipt.version }, { key: 'directory', label: t('res.applyDirectory'), children: <code style={{ overflowWrap: 'anywhere' }}>{receipt.targetDirectory}</code> }, { key: 'path', label: t('res.skillPath'), children: <code style={{ overflowWrap: 'anywhere' }}>{receipt.skillDirectory}</code> }, { key: 'discovery', label: t('res.discovery'), children: receipt.discovery.status === 'discovered-and-read' ? t('res.discovered') : receipt.discovery.status === 'failed' ? t('res.discoveryFailed') : t('res.notVerified') }, { key: 'hash', label: t('res.applyHash'), children: <code style={{ overflowWrap: 'anywhere' }}>{receipt.sha256}</code> }]} /><Button aria-expanded={receiptDetails} onClick={() => setReceiptDetails(value => !value)}>{t('res.viewReceipt')}</Button>{receiptDetails && <pre className="evidence-console" data-skill-application-receipt style={{ maxHeight: 280, overflow: 'auto' }}>{JSON.stringify(receipt, null, 2)}</pre>}<p>{receipt.discovery.note}</p><p className="muted">{t('res.applyFooter')}</p></>}
       </div>
     </Modal>
   </>;

@@ -13,6 +13,8 @@
 @media(max-width:600px){.compact-topbar .breadcrumb>strong,.compact-topbar .breadcrumb-separator{display:none}.compact-topbar .compact-system-switch{width:120px}.compact-topbar .compact-role-switch{width:136px}.compact-topbar .topbar-right{gap:3px}.framework-root .compact-topbar{padding:0 8px!important;gap:4px}}
 @media(max-width:420px){.compact-topbar .compact-system-switch{width:98px;font-size:11px}.compact-topbar .compact-role-switch{width:112px;font-size:11px}}
 
+.compact-topbar .compact-lang-switch{width:88px;flex:none;font-size:12px}
+@media(max-width:600px){.compact-topbar .compact-lang-switch{width:72px}}
 .compact-topbar .breadcrumb{align-items:center}
 .compact-topbar .breadcrumb-parent{flex:none;color:var(--ui-color-muted)}
 .compact-topbar .breadcrumb-parent:hover{color:var(--ui-color-primary)}

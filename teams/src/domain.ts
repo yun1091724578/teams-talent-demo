@@ -4,6 +4,7 @@ import { requireCurrentTaskMember, taskAssigneeName } from './task-assignment.js
 import { queueTaskCollection } from './task-automation.js';
 import { campaign, calculateCashback, runCashbackChecks } from './cashback.js';
 import { availableSkillIdsFor, selectedSkillBindings, type SkillBinding } from './resource-sharing.js';
+import { translate, type MessageKey } from '../../shared/i18n/index.js';
 import { initialWorkspace, type WorkspaceState, type Asset, type Material } from './workspace.js';
 export type Role = 'owner' | 'member';
 export type Stage = 'draft' | 'assigned' | 'developing' | 'failed' | 'fixed' | 'submitted' | 'returned' | 'accepted';
@@ -24,7 +25,7 @@ export interface DemoState {
   evolution: Evolution; adoptedSkill: string; adoptedAgent: string; audit: Audit[];
 }
 export type Action = 'assign' | 'knowledge' | 'prepare' | 'replay' | 'check-fail' | 'fix' | 'submit' | 'enroll' | 'purchase' | 'deduplicate' | 'uat' | 'accept' | 'return' | 'candidate' | 'evaluate' | 'release' | 'adopt';
-export const stageLabels: Record<Stage, string> = { draft: '待立项', assigned: '待开始', developing: '开发中', failed: '待修复', fixed: '待提交', submitted: '待 Owner 验收', returned: '已退回', accepted: '已验收' };
+export const stageKeys = { draft: 'stage.draft', assigned: 'stage.assigned', developing: 'stage.developing', failed: 'stage.failed', fixed: 'stage.fixed', submitted: 'stage.submitted', returned: 'stage.returned', accepted: 'stage.accepted' } as const satisfies Record<Stage, MessageKey>;
 export function initialState(): DemoState {
   return { assigneeId: null, campaignId: campaign.id, schemaVersion:2, workspace:initialWorkspace(), revision: 0, published: false, assigned: false, knowledge: false, stage: 'draft', context: null, checks: 'none', security: 'unverified', enrolled: false, transactions: [], balance: 2550.75, duplicateChecked: false, uat: false, returnReason: '', evolution: 'none', adoptedSkill: '1.0.0', adoptedAgent: 'r1', audit: [] };
 }
@@ -32,7 +33,11 @@ export class DomainError extends Error { constructor(message: string, public sta
 function requireCondition(ok: unknown, message: string): asserts ok { if (!ok) throw new DomainError(message); }
 const owners: Action[] = ['assign', 'knowledge', 'candidate', 'evaluate', 'enroll', 'purchase', 'deduplicate', 'uat', 'accept', 'return', 'release', 'adopt'];
 const members: Action[] = ['prepare', 'replay', 'check-fail', 'fix', 'submit'];
-export const actionLabels: Record<Action, string> = { assign: '确认需求并分配', knowledge: '发起项目知识整合', prepare: '采用能力并冻结上下文', replay: '开始开发', 'check-fail': '查看首次检查结果', fix: '关联修复与复测结果', submit: '提交交付包', enroll: '确认白金卡资格', purchase: '消费 120 元', deduplicate: '重复评估同一交易', uat: '运行边界验收', accept: '通过功能验收', return: '退回补充', candidate: '生成改进候选', evaluate: '评估 Skill 与 Agent', release: '发布能力新版本', adopt: '项目采用新版本' };
+/** Stable ids for action labels. The audit trail keeps the Chinese text, so labels mirror the zh catalog. */
+export const actionKeys = { assign: 'action.assign', knowledge: 'action.knowledge', prepare: 'action.prepare', replay: 'action.replay', 'check-fail': 'action.check-fail', fix: 'action.fix', submit: 'action.submit', enroll: 'action.enroll', purchase: 'action.purchase', deduplicate: 'action.deduplicate', uat: 'action.uat', accept: 'action.accept', return: 'action.return', candidate: 'action.candidate', evaluate: 'action.evaluate', release: 'action.release', adopt: 'action.adopt' } as const satisfies Record<Action, MessageKey>;
+export const actionLabels: Record<Action, string> = Object.fromEntries(
+  (Object.keys(actionKeys) as Action[]).map(action => [action, translate('zh', actionKeys[action])]),
+) as Record<Action, string>;
 export function transition(previous: DemoState, action: Action, role: Role, payload: { reason?: string; knowledgeVersion?: string; assigneeId?: string } = {}): DemoState {
   requireCondition(Object.hasOwn(actionLabels, action), '未知操作');
   if (owners.includes(action) && role !== 'owner' || members.includes(action) && role !== 'member') throw new DomainError('当前角色无权执行此操作', 403);
