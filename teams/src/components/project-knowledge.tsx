@@ -53,13 +53,14 @@ function ArtifactDrawer({ artifact, onClose }: { artifact: PublishedArtifact; on
   return <Drawer className="talents-artifact-drawer" title={artifact.name} width={880} open onClose={onClose} destroyOnHidden>
     <Descriptions size="small" column={2} items={[
       { key: 'capability', label: t('pk.capability'), children: artifact.capabilityName },
-      { key: 'version', label: t('pk.version'), children: `v${artifact.version} · ${day(artifact.publishedAt)}` },
+      // A code graph is the repository's index as it is: its note says when the index was updated, it shows no version.
+      ...(artifact.capability === 'codegraph' ? [] : [{ key: 'version', label: t('pk.version'), children: `v${artifact.version} · ${day(artifact.publishedAt)}` }]),
       { key: 'delivery', label: t('pk.delivery'), children: deliveryNames[artifact.delivery] },
       { key: 'note', label: t('pk.updateNote'), children: artifact.note },
       ...(artifact.stats ?? []).map(([label, value]) => ({ key: label, label, children: value })),
     ]} />
     {artifact.kind === 'index'
-      ? <><p className="muted">{t('pk.indexNote')}</p>{artifact.id === 'a-cg-java' && <Button href={talentLink('review', { projectId: artifact.projectId ?? undefined }) + '&id=' + encodeURIComponent(artifact.id)} target="_blank" rel="noreferrer">{t('pk.viewCodeGraph')}</Button>}</>
+      ? <><p className="muted">{t('pk.indexNote')}</p>{artifact.capability === 'codegraph' && <Button href={talentLink('review', { projectId: artifact.projectId ?? undefined }) + '&id=' + encodeURIComponent(artifact.id)} target="_blank" rel="noreferrer">{t('pk.viewCodeGraph')}</Button>}</>
       : <>{artifact.files.length > 1 && <Segmented className="talents-file-tabs" value={path} onChange={value => setPath(value as string)} options={artifact.files.map(item => ({ value: item.path, label: item.title }))} />}
         {file && <FileView artifact={artifact} file={file} />}</>}
   </Drawer>;
@@ -88,7 +89,7 @@ export function ProjectKnowledge({ projectId, compact = false }: { projectId: st
       : ready ? groups.map(group => <section key={group.id} className="talents-knowledge-group"><h4>{categoryNames[group.id] ?? group.id}</h4>
         <div className="project-material-list">{group.items.map(artifact => <div className="project-material" key={artifact.id} data-artifact={artifact.id}><div>
           <strong>{artifact.name}</strong><p>{artifact.description}</p>
-          <small>{artifact.capabilityName} · v{artifact.version} · {t('pk.publishedAt', { date: day(artifact.publishedAt) })}{artifact.note ? ' · ' + artifact.note : ''}</small>
+          <small>{artifact.capabilityName}{artifact.capability === 'codegraph' ? '' : ` · v${artifact.version} · ${t('pk.publishedAt', { date: day(artifact.publishedAt) })}`}{artifact.note ? ' · ' + artifact.note : ''}</small>
         </div>{artifact.projectId === null && <Tag>{t('pk.teamKnowledge')}</Tag>}<Tag>{deliveryNames[artifact.delivery]}</Tag><Button size="small" onClick={() => setOpened(artifact)}>{t('pk.view')}</Button></div>)}</div></section>)
       : <><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('pk.empty')} /><p className="muted">{t('pk.prNote')}</p></>}
     <Space wrap className="card-actions">

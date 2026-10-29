@@ -46,6 +46,8 @@ export function ArtifactStatus({ a }: { a: Artifact }) {
   const st = status(a);
   if (st === 'draft') return <Tag color="warning">{t('ui.draft')}</Tag>;
   if (st === 'update') return <Tag color="warning">{t('ui.newVersionDraft')}</Tag>;
+  // A code graph shows the index as it is when opened: it has no version to show.
+  if (a.cap === 'codegraph') return <Tag color="success">{t('ui.built')}</Tag>;
   return <Tag color="success">{a.kind === 'index' ? t('ui.remoteIndex') : a.submission ? t('ui.prCreated') : t('ui.hasVersion')} · v{a.published!.version}</Tag>;
 }
 /** 新 / 改 / 删 markers next to file names. */

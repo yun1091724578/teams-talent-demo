@@ -1,4 +1,4 @@
-// 知识任务：一个层级（团队或项目）的任务列表（当前任务分定时任务和一次性任务，另有已完成），任务详情与
+﻿// 知识任务：一个层级（团队或项目）的任务列表（当前任务分定时任务和一次性任务，另有已完成），任务详情与
 // 运行进度，新建任务（来源在单独的选择弹窗中选）。运行可以取消，任务可以删除，定时任务可以暂停。
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, App, Button, Checkbox, Collapse, Drawer, Input, InputNumber, Modal, Progress, Radio, Segmented, Select, Space, Steps, Table, Tag } from 'antd';
@@ -9,7 +9,7 @@ import { currentT } from '../../../shared/i18n/index.ts';
 import { levelHash } from '../navigation.ts';
 import type { Capability, Session, TalentsState, Task } from '../types.ts';
 import { artifact, basisOf, capability, changesSince, levelName, levelSessions, levelSources, member, memberName, project, session, source, task, taskName } from '../demo/model.ts';
-import { cancelRun, existingArtifact, runPlan, runProgress, startRun } from '../demo/runs.ts';
+import { cancelRun, existingArtifact, runPlan, runProgress, runsOnService, startRun } from '../demo/runs.ts';
 import { askICode } from '../demo/ask-icode.ts';
 import { now, tokens, uid, versionLabel, when } from '../demo/format.ts';
 import { CapIcon, CardGrid, EmptyState, Fields, InfoTip, ItemCard, Section } from '../components/ui.tsx';
@@ -78,12 +78,15 @@ function contextText(st: TalentsState, t: Task) {
 
 /** Run, cancel, pause and delete, shared by the cards and the detail. Cancelling and deleting ask first. */
 function useTaskActions() {
-  const { state: st, update, toast } = useTalents();
+  const { state: st, update, toast, startCodegraph } = useTalents();
   const { modal } = App.useApp();
   const tr = useT();
   const me = member(st, st.team.me)?.name ?? tr('tk.admin');
   return {
-    run(id: string) { update(d => startRun(d, task(d, id)!)); toast(tr('tk.started')); },
+    run(id: string) {
+      if (runsOnService(task(st, id)!.cap)) { startCodegraph(id).then(() => toast(tr('tk.buildStarted')), e => toast(tr('tk.buildFailed', { error: (e as Error).message }))); return; }
+      update(d => startRun(d, task(d, id)!)); toast(tr('tk.started'));
+    },
     cancel(id: string) {
       const t = task(st, id)!;
       modal.confirm({ title: tr('tk.cancelTitle'), okText: tr('tk.cancelOk'), okButtonProps: { danger: true }, cancelText: tr('tk.cancelKeep'),
@@ -130,7 +133,8 @@ export function LevelTasks({ pid, toolbar }: { pid: string | null; toolbar: Tool
   };
   const card = (row: Task) => {
     const cap = capability(st, row.cap), running = row.status === 'running', p = running ? runProgress(row, clock) : null;
-    const buttons = running ? <Button size="small" danger onClick={() => actions.cancel(row.id)}>{t('tk.cancelRun')}</Button>
+    // A CodeGraph build is not cancelled: stopping codegraph midway can leave an index it refuses to update.
+    const buttons = running ? !row.run?.live && <Button size="small" danger onClick={() => actions.cancel(row.id)}>{t('tk.cancelRun')}</Button>
       : isDaily(row) ? <><PauseButton t={row} size="small" onClick={() => actions.pause(row.id, !row.paused)} /><Button size="small" onClick={() => run(row.id)}>{t('tk.runDailyOnce')}</Button></>
       : isDone(row) ? <Button size="small" onClick={() => setForm({ copy: row.id })}>{t('tk.copyTask')}</Button>
       : <Button size="small" onClick={() => run(row.id)}>{t('tk.runNow')}</Button>;
@@ -181,7 +185,7 @@ function TaskDetail({ id, onClose, onRun, onCopy }: { id: string; onClose(): voi
       : a.published!.auto ? tr('tk.outcomeAuto', { version: a.published!.version }) : tr('tk.outcomeVersion', { version: a.published!.version }))
     : a.published ? tr('tk.outcomeUpdate') : tr('tk.outcomeNew'));
   return <Drawer open width={560} onClose={onClose} title={<div><div className="caption">{cap.name}</div>{taskName(st, t)}</div>}
-    footer={<div className="drawer-foot">{running ? <><span className="spacer" /><Button danger onClick={() => actions.cancel(t.id)}>{tr('tk.cancelRun')}</Button></> : <>
+    footer={<div className="drawer-foot">{running ? <><span className="spacer" />{!t.run?.live && <Button danger onClick={() => actions.cancel(t.id)}>{tr('tk.cancelRun')}</Button>}</> : <>
       <Button danger onClick={() => actions.remove(t.id, onClose)}>{tr('tk.delete')}</Button><span className="spacer" />
       {isDaily(t) && <PauseButton t={t} onClick={() => actions.pause(t.id, !t.paused)} />}
       {isDone(t) ? <Button onClick={onCopy}>{tr('tk.copyTask')}</Button> : <Button onClick={onRun}>{isDaily(t) ? tr('tk.runDailyOnce') : tr('tk.runNow')}</Button>}
@@ -282,7 +286,7 @@ function PrPicker({ repoId, initial, onDone, onClose }: { repoId: string; initia
 interface Preset { cap?: string; source?: string; from?: string; copy?: string }
 /** level: the team (null) or project the task belongs to; undefined lets the user choose (from 知识能力). */
 export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?: string | null; preset: Preset; onClose(): void; onCreated(id: string, started: boolean, level: string | null): void }) {
-  const { state: st, update, focusProject } = useTalents();
+  const { state: st, update, focusProject, startCodegraph, toast, teamsLink } = useTalents();
   const t = useT();
   // "重新提取" on an artifact: start from the task that built it.
   const fromArtifact = artifact(st, preset.from);
@@ -304,17 +308,22 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
   const [ctxSkills, setCtxSkills] = useState<string[]>(copied?.context?.skills ?? []), [ctxDocs, setCtxDocs] = useState<string[]>(copied?.context?.docs ?? []), [ctxNote, setCtxNote] = useState(copied?.context?.note ?? '');
   const [picking, setPicking] = useState<'sessions' | 'prs' | null>(null);
 
-  const own = levelSources(st, level), repos = own.filter(s => s.type === 'repo' && s.bound);
-  const pool = cap.input === 'docs' ? own.filter(s => s.type === 'docs') : cap.input === 'repo+pr' ? repos.filter(s => s.prs) : repos;
+  // A CodeGraph build runs now, in the repository as it is: it has no schedule and no update/rebuild choice.
+  const onService = runsOnService(capId);
+  // Repositories not yet bound to a local directory in Teams are listed but cannot be chosen; once bound in Teams they
+  // become choosable here without reopening the form.
+  const own = levelSources(st, level);
+  const listed = cap.input === 'docs' ? own.filter(s => s.type === 'docs') : own.filter(s => s.type === 'repo' && (cap.input !== 'repo+pr' || s.prs));
+  const pool = listed.filter(s => s.type === 'docs' || s.bound), unbound = listed.filter(s => s.type === 'repo' && !s.bound);
   const src = cap.input === 'sessions' ? 's-sessions' : pool.some(s => s.id === chosen) ? chosen : pool[0]?.id ?? null;
   // Update vs rebuild: only when the capability declares an update and this input already has knowledge.
   const modeInfo = (() => {
-    if (!cap.update || !src || cap.input === 'sessions') return null;
+    if (!cap.update || !src || cap.input === 'sessions' || onService) return null;
     const a = existingArtifact(st, { projectId: level, cap: capId, sources: [src] }), basis = a && basisOf(a);
     return basis ? { artifact: a!, changes: changesSince(source(st, src), basis) } : null;
   })();
 
-  let ok = !!src, hint = src ? '' : t('tk.noLevelSource', { level: levelName(st, level), kind: cap.input === 'docs' ? t('lv.docs') : cap.input === 'repo+pr' ? t('tk.repoWithPrs') : t('lv.repo') });
+  let ok = !!src, hint = src ? '' : unbound.length ? t('tk.unboundRepo') : t('tk.noLevelSource', { level: levelName(st, level), kind: cap.input === 'docs' ? t('lv.docs') : cap.input === 'repo+pr' ? t('tk.repoWithPrs') : t('lv.repo') });
   if (modeInfo && mode === 'update' && schedule !== 'daily' && modeInfo.changes && !modeInfo.changes.count) { ok = false; hint = t('tk.noChanges'); }
   if (cap.input === 'sessions') { ok = sessions.length > 0; hint = ok ? '' : t('tk.selectSessions'); }
   if (cap.input === 'repo+pr' && src) { ok = prs.length > 0; hint = ok ? '' : t('tk.selectPrs'); }
@@ -338,6 +347,12 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
     if (cap.params?.length) next.params = Object.fromEntries(cap.params.map(p => [p.name, p.type === 'array' ? String(values[p.name] ?? '').split('\n').map(x => x.trim()).filter(Boolean) : values[p.name] ?? (p.type === 'boolean' ? false : '')]));
     if (cap.input === 'sessions' && (ctxSkills.length || ctxDocs.length || ctxNote.trim())) next.context = { skills: ctxSkills, docs: ctxDocs, note: ctxNote.trim() || undefined };
     if (next.schedule.kind === 'daily' && cap.input !== 'sessions') next.skipUnchanged = skip;
+    if (onService) {
+      next.schedule = { kind: 'now' }; delete next.skipUnchanged;
+      update(d => { d.tasks.unshift(next); });
+      startCodegraph(id).catch(e => toast(t('tk.buildFailed', { error: (e as Error).message })));
+      onCreated(id, true, level); return;
+    }
     update(d => { d.tasks.unshift(next); if (schedule === 'now') startRun(d, d.tasks[0]); });
     onCreated(id, schedule === 'now', level);
   };
@@ -362,7 +377,10 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
         {cap.input === 'sessions'
           ? pickRow(sessions.length ? t('tk.selectedSessions', { count: sessions.length }) : t('tk.noSessions'), t(sessions.length ? 'tk.reselect' : 'tk.pickSessionsCta'), !sessions.length, () => setPicking('sessions'))
           : <div className="stack">
-            <Select value={src ?? undefined} onChange={v => { setChosen(v); setPrs([]); }} options={pool.map(s => ({ value: s.id, label: s.name }))} />
+            <Select value={src ?? undefined} onChange={v => { setChosen(v); setPrs([]); }} placeholder={unbound.length ? t('tk.unboundPlaceholder') : undefined}
+              options={listed.map(s => s.type === 'repo' && !s.bound ? { value: s.id, disabled: true, label: <>{s.name}<span className="caption">{t('tk.unboundSuffix')}</span></> } : { value: s.id, label: s.name })} />
+            {!src && unbound.length > 0 && level && <p className="ui-note">{t('tk.unboundNote', { names: unbound.map(s => s.name).join(t('common.listSeparator')) })}
+              <a href={teamsLink(level) + '&workspace=settings'} target="_blank" rel="noreferrer">{t('tk.bindInTeams')}</a>{t('tk.bindAfterSave')}</p>}
             {cap.input === 'repo+pr' && pickRow(prs.length ? t('tk.selectedPrs', { count: prs.length, list: prs.map(n => '#' + n).join(t('common.listSeparator')) }) : t('tk.noPrs'), t(prs.length ? 'tk.reselect' : 'tk.pickPrsCta'), !prs.length, () => setPicking('prs'))}
             {cap.input === 'repo+snippet' && <><Input value={scenario} onChange={e => setScenario(e.target.value)} placeholder={t('tk.scenario')} />
               <Input.TextArea rows={2} value={snippets} onChange={e => setSnippets(e.target.value)} placeholder={t('tk.snippets')} /></>}
@@ -386,10 +404,11 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
           <Radio value="build"><b>{t('tk.rebuild')}</b></Radio>
         </Radio.Group></div>}
       <div className="field"><span className="label">{t('tk.time')}{schedule === 'daily' && cap.input === 'sessions' && <> <InfoTip>{t('tk.dailySessionsTip')}</InfoTip></>}</span>
-        <Select value={schedule} onChange={setSchedule} options={[{ value: 'now', label: t('tk.now') }, { value: 'once', label: t('tk.once') }, { value: 'daily', label: t('tk.dailyOption') }]} />
-        {schedule === 'once' && <Input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} />}
-        {schedule === 'daily' && <Input type="time" value={time} onChange={e => setTime(e.target.value)} />}
-        {schedule === 'daily' && cap.input !== 'sessions' && <Checkbox checked={skip} onChange={e => setSkip(e.target.checked)}>{t('tk.skipUnchanged')}</Checkbox>}
+        <Select value={onService ? 'now' : schedule} onChange={setSchedule} disabled={onService} options={[{ value: 'now', label: t('tk.now') }, { value: 'once', label: t('tk.once') }, { value: 'daily', label: t('tk.dailyOption') }]} />
+        {onService && <span className="caption">{t('tk.onServiceNote')}</span>}
+        {schedule === 'once' && !onService && <Input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} />}
+        {schedule === 'daily' && !onService && <Input type="time" value={time} onChange={e => setTime(e.target.value)} />}
+        {schedule === 'daily' && !onService && cap.input !== 'sessions' && <Checkbox checked={skip} onChange={e => setSkip(e.target.checked)}>{t('tk.skipUnchanged')}</Checkbox>}
       </div>
       <label className="field"><span className="label">{t('tk.name')}</span>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder={taskName(st, { cap: capId, sources: src ? [src] : [], sessions: cap.input === 'sessions' ? sessions : undefined })} /></label>

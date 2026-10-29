@@ -2,94 +2,141 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Input, Segmented, Select, Space, Spin, Tag } from 'antd';
 import ForceGraph, { type LinkObject } from 'force-graph';
 import { forceCollide, forceX, forceY } from 'd3-force-3d';
-import type { GraphSnapshot } from '../../../shared/codegraph.ts';
-import { graphView, type GraphLevel, type ViewNode } from '../codegraph-model.ts';
-import { currentT } from '../../../shared/i18n/index.ts';
-import { useT } from '../i18n.tsx';
+import type { GraphHit, GraphLevel, GraphPage, NodeDetail, ViewNode, ViewOptions } from '../../../shared/codegraph.ts';
 import { paintLabel, paintNode, paintSelection, palette, readTheme, rgba } from './codegraph-paint.ts';
 import { InfoTip } from './ui.tsx';
+import { when } from '../demo/format.ts';
+import { useT } from '../i18n.tsx';
+import { currentT } from '../../../shared/i18n/index.ts';
+import type { MessageKey } from '../../../shared/i18n/index.ts';
 import './codegraph.css';
 
-type CanvasLink = LinkObject<ViewNode> & { kind: string; count: number; uncertain: boolean };
+type CanvasLink = LinkObject<ViewNode> & { kind: string; count: number };
 const EDGE = '#82999e';
 const idOf = (end: CanvasLink['source']) => typeof end === 'object' ? end.id as string : end as string;
 type Source = { filePath: string; startLine: number; endLine: number; content: string };
+class RequestError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 async function get<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? currentT('cg.readFailed'));
+  if (!response.ok) throw new RequestError(data.error ?? currentT('cg.readFailed'), response.status);
   return data;
 }
+const LEVEL_KEYS: { value: GraphLevel; key: MessageKey }[] = [{ value: 'dir', key: 'cg.dirStructure' }, { value: 'file', key: 'cg.fileRelations' }, { value: 'symbol', key: 'cg.symbolRelations' }];
+const GROUP_KEYS: Record<string, MessageKey> = { dir: 'cg.groupDir', file: 'cg.groupFile' };
+const groupLabel = (kind: string) => GROUP_KEYS[kind] ? currentT(GROUP_KEYS[kind]) : kind;
+const parent = (path: string) => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 
-export function CodeGraphView({ projectId }: { projectId: string }) {
-  const [graph, setGraph] = useState<GraphSnapshot>(), [failure, setFailure] = useState(''), [attempt, setAttempt] = useState(0);
-  const [level, setLevel] = useState<GraphLevel>('symbol'), [service, setService] = useState('');
-  const [tests, setTests] = useState(true), [crossCalls, setCrossCalls] = useState(true);
-  const [relation, setRelation] = useState(''), [kinds, setKinds] = useState<string[]>([]), [hops, setHops] = useState(1);
-  const [query, setQuery] = useState(''), [selected, setSelected] = useState(''), [focus, setFocus] = useState('');
-  const [source, setSource] = useState<Source>(), [sourceError, setSourceError] = useState('');
+/** The code graph of a repository, read from its CodeGraph index when opened (or refreshed). The service sends one view
+ *  at a time (server/codegraph-query.ts): the directories, files or symbols under a scope, or a symbol's neighbourhood,
+ *  limited to what draws smoothly.
+ *  onLoaded: the index was read (the artifact's figures may change). */
+export function CodeGraphView({ projectId, sourceId, onLoaded }: { projectId: string; sourceId: string; onLoaded?(): void }) {
+  const t = useT();
+  const [page, setPage] = useState<GraphPage>(), [failure, setFailure] = useState(''), [loading, setLoading] = useState(false);
+  // wanted: the view asked for (the service fills in the rest); reopen: read the index again.
+  const [wanted, setWanted] = useState<Partial<ViewOptions>>({}), [reopen, setReopen] = useState(0);
+  const snapshot = useRef<string | null>(null), opened = useRef(-1);
+  // The request the drawn view answers.
+  const [drawnFor, setDrawnFor] = useState('');
+  const [query, setQuery] = useState(''), [hits, setHits] = useState<GraphHit[]>(), [selected, setSelected] = useState('');
+  const [detail, setDetail] = useState<NodeDetail>(), [source, setSource] = useState<Source>(), [sourceError, setSourceError] = useState('');
   const host = useRef<HTMLDivElement>(null), instance = useRef<ForceGraph<ViewNode, CanvasLink>>(undefined);
-  const selectedRef = useRef(''), syncRef = useRef<() => void>(undefined); selectedRef.current = selected;
-  useEffect(() => {
-    const controller = new AbortController(); setFailure(''); setGraph(undefined);
-    get<GraphSnapshot>('/api/codegraph/' + encodeURIComponent(projectId), controller.signal).then(setGraph).catch(e => { if (!controller.signal.aborted) setFailure(e.message); });
-    return () => controller.abort();
-  }, [attempt, projectId]);
-  const services = useMemo(() => [...new Set(graph?.nodes.map(n => n.service))].sort(), [graph]);
-  const colors = useMemo(() => new Map(services.map((s, i) => [s, palette[i % palette.length]])), [services]);
-  const options = { level, service, tests, crossCalls, kinds, relation, focus, hops };
-  const view = useMemo(() => graph ? graphView(graph, options) : { nodes: [], links: [] }, [graph, level, service, tests, crossCalls, kinds, relation, focus, hops]);
-  const selectedGroup = view.nodes.find(n => n.id === selected);
-  const node = graph?.nodes.find(n => n.id === (level === 'symbol' ? selected : selectedGroup?.members.find(id => graph.nodes.find(n => n.id === id)?.kind === 'file') ?? selectedGroup?.members[0]));
-  const results = useMemo(() => query.trim() ? view.nodes.filter(n => `${n.name} ${n.id}`.toLowerCase().includes(query.trim().toLowerCase())) : [], [view, query]);
-  const choose = (n: ViewNode) => {
-    setSelected(n.id);
-    setQuery('');
-    const chart = instance.current, positioned = chart?.graphData().nodes.find(item => item.id === n.id);
-    if (!chart || !positioned) return;
-    chart.centerAt(positioned.x ?? 0, positioned.y ?? 0, 600);
-    if (level !== 'service') chart.zoom(Math.max(chart.zoom(), level === 'symbol' ? 2.6 : 1.8), 600);
+  const selectedRef = useRef(''), syncRef = useRef<() => void>(undefined), centerRef = useRef(''); selectedRef.current = selected;
+  const api = (part: string, params: Record<string, string | undefined>) => {
+    const search = new URLSearchParams({ source: sourceId });
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') search.set(key, value);
+    return `/api/codegraph/${encodeURIComponent(projectId)}${part}?${search}`;
   };
+  const wantedKey = JSON.stringify(wanted);
   useEffect(() => {
-    if (!host.current || !graph) return;
-    const container = host.current;
+    const controller = new AbortController(), fresh = opened.current !== reopen;
+    const load = async (open: boolean): Promise<void> => {
+      setLoading(true);
+      try {
+        const next = await get<GraphPage>(api('', { level: wanted.level, scope: wanted.scope, tests: wanted.tests === undefined ? undefined : wanted.tests ? '1' : '0',
+          kinds: wanted.kinds?.join(','), relation: wanted.relation, focus: wanted.focus, hops: wanted.hops ? String(wanted.hops) : undefined,
+          snapshot: open ? undefined : snapshot.current ?? undefined }), controller.signal);
+        snapshot.current = next.metadata.snapshotId; opened.current = reopen;
+        // A notice is about the graph that was opened: later views of it keep it.
+        setPage(previous => open ? next : { ...next, notice: previous?.notice }); setDrawnFor(wantedKey); setFailure('');
+        if (open) onLoaded?.();
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        // The graph was generated again (another page opened it after the index changed): open it again.
+        if (e instanceof RequestError && e.status === 409 && !open) return load(true);
+        setFailure((e as Error).message);
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    };
+    void load(fresh || !snapshot.current);
+    return () => controller.abort();
+  }, [wantedKey, reopen, projectId, sourceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const options = page?.options, level = options?.level ?? 'symbol';
+  const colors = useMemo(() => new Map((page?.groups ?? []).map((g, i) => [g, palette[i % palette.length]])), [page?.groups]);
+  const show = (next: Partial<ViewOptions>, select = '') => { setWanted({ ...options, ...next }); setSelected(select); centerRef.current = select; setQuery(''); };
+  const selectedNode = page?.nodes.find(n => n.id === selected);
+
+  // Search looks at the whole graph, not only what is drawn.
+  useEffect(() => {
+    setHits(undefined);
+    if (!query.trim() || !page) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => get<GraphHit[]>(api('/search', { q: query.trim(), tests: options!.tests ? '1' : '0', snapshot: page.metadata.snapshotId }), controller.signal)
+      .then(setHits, () => undefined), 200);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [query, page?.metadata.snapshotId, options?.tests]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = (hit: GraphHit) => hit.kind === 'file'
+    ? show({ level: 'file', scope: parent(hit.filePath), focus: '', tests: options!.tests || hit.test }, hit.filePath)
+    : show({ level: 'symbol', focus: hit.id, scope: '', tests: options!.tests || hit.test }, hit.id);
+
+  useEffect(() => {
+    if (!host.current || !page) return;
+    const container = host.current, view = page;
     const neighbours = new Map(view.nodes.map(n => [n.id, new Set<string>()]));
     for (const l of view.links) { neighbours.get(l.source)!.add(l.target); neighbours.get(l.target)!.add(l.source); }
     const degree = (n: ViewNode) => neighbours.get(n.id)!.size;
-    const radius = new Map(view.nodes.map(n => [n.id, level === 'service' ? 10 + Math.sqrt(n.members.length) * .7
+    const dirs = level === 'dir', big = view.nodes.length > 800 || view.links.length > 1500;
+    const radius = new Map(view.nodes.map(n => [n.id, dirs ? Math.min(26, 5 + Math.log2(n.members + 1) * 1.8)
       : level === 'file' ? Math.min(14, 3 + Math.sqrt(degree(n)) * 1.2) : Math.min(10, 2 + Math.sqrt(degree(n)))]));
-    // The best-connected nodes keep their labels when zoomed out; the rest appear as the user zooms in.
-    const labelled = new Set([...view.nodes].sort((a, b) => degree(b) - degree(a)).slice(0, level === 'service' ? undefined : 15).map(n => n.id));
-    const serviceOf = new Map(view.nodes.map(n => [n.id, n.service]));
-    const focused = level === 'symbol' && neighbours.has(focus);
+    // The best-connected nodes keep their labels when zoomed out (every one in a directory view); the rest appear on zooming in.
+    const labelled = new Set([...view.nodes].sort((a, b) => degree(b) - degree(a)).slice(0, dirs ? undefined : 15).map(n => n.id));
+    const groupOf = new Map(view.nodes.map(n => [n.id, n.group]));
+    const focused = !!options?.focus && neighbours.has(options.focus);
     const nodes = view.nodes.map(n => ({ ...n })), byId = new Map(nodes.map(n => [n.id, n]));
-    if (focused) Object.assign(byId.get(focus)!, { fx: 0, fy: 0 });
+    if (focused) Object.assign(byId.get(options!.focus)!, { fx: 0, fy: 0 });
     // Hover wins over selection; both light the node and its neighbours and dim everything else.
     let hovered = '', active = '', lit: Set<string> | undefined, ticks = 0, fitted = false;
     const linked = (l: CanvasLink) => !!active && (idOf(l.source) === active || idOf(l.target) === active);
-    const baseAlpha = level === 'service' ? .5 : .35;
     let theme = readTheme(container);
-    const chart = new ForceGraph<ViewNode, CanvasLink>(container).height(900)
-      .nodeRelSize(1).nodeVal(n => radius.get(n.id)! ** 2).nodeColor(n => colors.get(n.service)!)
+    const center = () => {
+      const target = byId.get(centerRef.current);
+      if (!target) return chart.zoomToFit(600, 40);
+      centerRef.current = '';
+      chart.centerAt(target.x ?? 0, target.y ?? 0, 600); chart.zoom(level === 'symbol' ? 2.6 : 1.8, 600);
+    };
+    const chart = new ForceGraph<ViewNode, CanvasLink>(container).height(Math.max(1, container.clientHeight))
+      .nodeRelSize(1).nodeVal(n => radius.get(n.id)! ** 2).nodeColor(n => colors.get(n.group)!)
       .nodeLabel(n => {
         const tip = document.createElement('div'), title = tip.appendChild(document.createElement('strong'));
-        title.textContent = n.name;
-        tip.append(document.createElement('br'), `${n.kind} · ${n.service} · ${currentT('cg.related', { degree: degree(n) })}${level === 'symbol' ? '' : ` · ${currentT('cg.symbols', { count: n.members.length })}`}`);
+        title.textContent = level === 'symbol' ? n.name : n.id;
+        tip.append(document.createElement('br'), `${groupLabel(n.kind)} · ${currentT('cg.related', { degree: degree(n) })}${level === 'symbol' ? '' : ` · ${currentT('cg.symbols', { count: n.members.toLocaleString() })}`}`);
         return tip;
       })
       .nodeCanvasObjectMode(() => 'replace')
-      .nodeCanvasObject((n, ctx) => paintNode(ctx, n.x!, n.y!, radius.get(n.id)!, colors.get(n.service)!, !!lit && !lit.has(n.id)))
-      .linkCurvature(level === 'service' ? .25 : .18)
-      // Links stay grey until their node is lit, then take the colour of the service they start from.
-      .linkColor(l => linked(l) ? rgba(colors.get(serviceOf.get(idOf(l.source))!)!, .85) : rgba(EDGE, lit ? .06 : baseAlpha))
-      .linkWidth(l => (linked(l) ? 2.2 : 1) * Math.min(level === 'service' ? 6 : 2.5, .6 + Math.log2(l.count + 1) * (level === 'service' ? .8 : .35)))
-      .linkDirectionalArrowLength(l => level === 'symbol' && !linked(l) ? 0 : 4).linkDirectionalArrowRelPos(1)
-      .linkDirectionalParticleWidth(level === 'service' ? 4 : 2.5).linkDirectionalParticleSpeed(.008).linkDirectionalParticleColor(l => colors.get(serviceOf.get(idOf(l.source))!)!)
-      .linkLabel(e => `${e.kind} × ${e.count}`)
+      .nodeCanvasObject((n, ctx) => paintNode(ctx, n.x!, n.y!, radius.get(n.id)!, colors.get(n.group)!, !!lit && !lit.has(n.id)))
+      // Straight links draw much faster when there are many.
+      .linkCurvature(big ? 0 : dirs ? .2 : .18)
+      // Links stay grey until their node is lit, then take the colour of the node they start from.
+      .linkColor(l => linked(l) ? rgba(colors.get(groupOf.get(idOf(l.source))!)!, .85) : rgba(EDGE, lit ? .06 : dirs ? .5 : .35))
+      .linkWidth(l => (linked(l) ? 2.2 : 1) * Math.min(dirs ? 6 : 2.5, .6 + Math.log2(l.count + 1) * (dirs ? .7 : .35)))
+      .linkDirectionalArrowLength(l => (level === 'symbol' || big) && !linked(l) ? 0 : 4).linkDirectionalArrowRelPos(1)
+      .linkDirectionalParticleWidth(dirs ? 4 : 2.5).linkDirectionalParticleSpeed(.008).linkDirectionalParticleColor(l => colors.get(groupOf.get(idOf(l.source))!)!)
+      .linkLabel(e => level === 'symbol' ? `${e.kind} × ${e.count}` : currentT('cg.relationSummary', { count: e.count.toLocaleString(), kind: e.kind }))
       .onRenderFramePost((ctx, scale) => {
         const chosen = byId.get(selectedRef.current);
         if (chosen) paintSelection(ctx, chosen.x!, chosen.y!, radius.get(chosen.id)!, scale, theme);
-        const size = (level === 'service' ? 13 : 11) / scale, low = chart.screen2GraphCoords(0, 0), high = chart.screen2GraphCoords(chart.width(), 900);
+        const size = (dirs ? 12 : 11) / scale, low = chart.screen2GraphCoords(0, 0), high = chart.screen2GraphCoords(chart.width(), chart.height());
         ctx.font = `500 ${size}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
         for (const n of nodes) {
           const r = radius.get(n.id)!;
@@ -99,94 +146,102 @@ export function CodeGraphView({ projectId }: { projectId: string }) {
         }
       })
       .onNodeHover(n => { hovered = n?.id ?? ''; sync(); })
-      .onNodeClick(choose).onBackgroundClick(() => setSelected(''))
-      .d3VelocityDecay(.35).cooldownTicks(220)
-      .onEngineTick(() => { if (++ticks === 70) chart.zoomToFit(900, 40); })
-      .onEngineStop(() => { if (!fitted) chart.zoomToFit(600, 40); fitted = true; });
-    // Services sit on a ring and pull their own nodes toward them, so each service settles as its own cluster.
-    const services = [...new Set(view.nodes.map(n => n.service))], spread = Math.max(120, Math.sqrt(view.nodes.length) * 9);
-    const anchors = new Map(services.map((s, i) => [s, services.length < 2 || level === 'service' ? [0, 0] : [Math.cos(2 * Math.PI * i / services.length) * spread, Math.sin(2 * Math.PI * i / services.length) * spread]]));
-    const clustered = level !== 'service' && !focused, pull = level === 'service' ? .08 : .06;
-    chart.d3Force('charge')!.strength(level === 'service' ? -900 : focused ? -160 : level === 'file' ? -45 : -22).distanceMax(level === 'service' ? Infinity : 320);
-    chart.d3Force('link')!.distance(level === 'service' ? 200 : focused ? 70 : level === 'file' ? 34 : 20);
-    chart.d3Force('collide', forceCollide<ViewNode>(n => radius.get(n.id)! + (level === 'service' ? 14 : 1.5)));
-    // The service overview has a single anchor at the centre, which also keeps unlinked services from drifting off.
-    chart.d3Force('x', clustered || level === 'service' ? forceX<ViewNode>(n => anchors.get(n.service)![0]).strength(pull) : null);
-    chart.d3Force('y', clustered || level === 'service' ? forceY<ViewNode>(n => anchors.get(n.service)![1]).strength(pull) : null);
+      .onNodeClick(n => setSelected(n.id)).onBackgroundClick(() => setSelected(''))
+      // A large view settles mostly before it is first drawn, and stops sooner.
+      .warmupTicks(0).d3VelocityDecay(.35).cooldownTicks(big ? 100 : 220)
+      .onEngineTick(() => { if (++ticks === 70 && !centerRef.current) chart.zoomToFit(900, 40); })
+      .onEngineStop(() => { if (!fitted) center(); fitted = true; });
+    chart.d3Force('charge')!.strength(dirs ? -420 : focused ? -160 : level === 'file' ? -45 : -22).distanceMax(dirs ? Infinity : 320);
+    chart.d3Force('link')!.distance(dirs ? 110 : focused ? 70 : level === 'file' ? 34 : 20);
+    chart.d3Force('collide', forceCollide<ViewNode>(n => radius.get(n.id)! + (dirs ? 10 : 1.5)));
+    // A weak pull to the centre keeps unlinked nodes from drifting off.
+    chart.d3Force('x', focused ? null : forceX<ViewNode>(0).strength(dirs ? .08 : .04));
+    chart.d3Force('y', focused ? null : forceY<ViewNode>(0).strength(dirs ? .08 : .04));
     const redraw = () => chart.nodeColor(chart.nodeColor()); // re-setting a styling prop requests a redraw
     // Particles run only on the lit links, so an idle graph stops redrawing.
     const sync = () => {
       active = hovered || selectedRef.current;
       lit = neighbours.has(active) ? new Set([active, ...neighbours.get(active)!]) : undefined;
-      chart.linkDirectionalParticles(l => linked(l) ? 2 : 0);
+      chart.linkDirectionalParticles(l => linked(l) && !big ? 2 : 0);
       redraw();
     };
     const themeWatch = new MutationObserver(() => { theme = readTheme(container); redraw(); });
     themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     instance.current = chart; syncRef.current = sync;
-    const observer = new ResizeObserver(([entry]) => chart.width(Math.max(1, entry.contentRect.width)));
+    const observer = new ResizeObserver(([entry]) => chart.width(Math.max(1, entry.contentRect.width)).height(Math.max(1, entry.contentRect.height)));
     observer.observe(container);
     chart.graphData({ nodes, links: view.links.map(e => ({ ...e })) });
     sync();
     return () => { observer.disconnect(); themeWatch.disconnect(); chart._destructor(); instance.current = undefined; syncRef.current = undefined; };
-  }, [graph, view, colors, level, focus]);
+  }, [page, colors]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => syncRef.current?.(), [selected]);
+
+  // Details and source of the graph node the selection stands for (a symbol, or a file's file node).
+  const detailNode = selectedNode?.node;
   useEffect(() => {
-    setSource(undefined); setSourceError('');
-    if (!node || !graph) return;
-    const controller = new AbortController();
-    get<Source>(`/api/codegraph/${encodeURIComponent(projectId)}/source?id=${encodeURIComponent(node.id)}&snapshot=${graph.metadata.snapshotId}`, controller.signal)
-      .then(setSource).catch(e => { if (!controller.signal.aborted) setSourceError(e.message); });
+    setDetail(undefined); setSource(undefined); setSourceError('');
+    if (!detailNode || !page) return;
+    const controller = new AbortController(), at = page.metadata.snapshotId;
+    get<NodeDetail>(api('/node', { id: detailNode, snapshot: at }), controller.signal).then(setDetail, () => undefined);
+    get<Source>(api('/source', { id: detailNode, snapshot: at }), controller.signal).then(setSource).catch(e => { if (!controller.signal.aborted) setSourceError(e.message); });
     return () => controller.abort();
-  }, [node?.id, graph?.metadata.snapshotId]);
-  const t = useT();
-  if (failure) return <Alert type="error" title={t('cg.cannotRead')} description={failure} action={<Button onClick={() => setAttempt(a => a + 1)}>{t('shell.retry')}</Button>} />;
-  if (!graph) return <Spin tip={t('cg.loading')}><div style={{ height: 160 }} /></Spin>;
-  const m = graph.metadata;
-  const reset = () => { setSelected(''); setFocus(''); setQuery(''); };
-  const connections = node ? graph.edges.filter(e => e.source === node.id || e.target === node.id) : [];
+  }, [detailNode, page?.metadata.snapshotId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (failure && !page) return <Alert type="error" title={t('cg.cannotRead')} description={failure} action={<Button onClick={() => setReopen(n => n + 1)}>{t('boot.retry')}</Button>} />;
+  if (!page || !options) return <Spin tip={t('cg.loadingRepo')}><div style={{ height: 160 }} /></Spin>;
+  const m = page.metadata, node = detail?.node;
+  // The controls show what was asked for until it is drawn, then what was drawn (the service may adjust it).
+  const asked: ViewOptions = drawnFor !== wantedKey ? { ...options, ...wanted } : options;
+  const crumbs = options.scope ? options.scope.split('/') : [];
+  const limited = page.total.nodes > page.nodes.length || page.total.links > page.links.length;
   return <div className="codegraph-view">
-    <div className="cg-stats">{[['f.files', m.files], ['cg.nodes', m.nodes], ['cg.edges', m.edges]].map(([key, value]) => <div key={key}><strong>{Number(value).toLocaleString()}</strong><span>{t(key as 'f.files')}</span></div>)}</div>
+    <div className="cg-stats">{[['cg.files', m.files], ['cg.nodes', m.nodes], ['cg.edges', m.edges]].map(([key, value]) => <div key={key}><strong>{Number(value).toLocaleString()}</strong><span>{t(key as 'cg.files')}</span></div>)}
+      <p className="caption cg-indexed">{t('cg.indexedAt', { date: when(m.indexedAt) })}{m.revision && t('cg.commitShort', { sha: m.revision.slice(0, 7) })}<Button size="small" type="link" onClick={() => setReopen(n => n + 1)}>{t('cg.refresh')}</Button></p></div>
+    {page.notice && <Alert type="warning" showIcon title={page.notice} />}
+    {failure && <Alert type="error" showIcon title={failure} />}
     <div className="cg-toolbar">
-      <Segmented aria-label={t('cg.level')} value={level} onChange={v => { setLevel(v as GraphLevel); if (v === 'service') setService(''); reset(); }} options={[{ value: 'service', label: t('cg.serviceOverview') }, { value: 'file', label: t('cg.fileRelations') }, { value: 'symbol', label: t('cg.symbolRelations') }]} />
-      <Select aria-label={t('cg.serviceFilter')} value={service} onChange={v => { setService(v); reset(); }} options={[{ value: '', label: t('cg.allServices') }, ...services.map(value => ({ value, label: value }))]} />
-      <Select aria-label={t('cg.relationFilter')} value={relation} onChange={setRelation} options={[{ value: '', label: t('cg.allRelations') }, ...Object.keys(m.edgeKinds).map(value => ({ value, label: value }))]} />
-      {level === 'symbol' && <><Select mode="multiple" aria-label={t('cg.symbolKinds')} placeholder={t('cg.kindsPlaceholder')} value={kinds} onChange={setKinds} options={Object.keys(m.nodeKinds).map(value => ({ value, label: value }))} /><Select aria-label={t('cg.hops')} value={hops} onChange={setHops} options={[{ value: 1, label: t('cg.hop1') }, { value: 2, label: t('cg.hop2') }]} /></>}
-      <Checkbox checked={tests} onChange={e => setTests(e.target.checked)}>{t('cg.includeTests')}</Checkbox>
-      <Checkbox checked={crossCalls} onChange={e => setCrossCalls(e.target.checked)}>{t('cg.includeCrossCalls')}</Checkbox>
-      <Button onClick={() => { reset(); instance.current?.zoomToFit(350, 35); }}>{t('cg.resetView')}</Button>
+      <Segmented aria-label={t('cg.level')} value={asked.level} onChange={v => show({ level: v as GraphLevel, focus: '' })} options={LEVEL_KEYS.map(l => ({ value: l.value, label: t(l.key) }))} />
+      <Select aria-label={t('cg.relationFilter')} value={asked.relation} onChange={relation => show({ relation }, selected)} options={[{ value: '', label: t('cg.allRelations') }, ...Object.keys(m.edgeKinds).map(value => ({ value, label: value }))]} />
+      {level === 'symbol' && <><Select mode="multiple" aria-label={t('cg.symbolKinds')} placeholder={t('cg.kindsPlaceholder')} value={asked.kinds} onChange={kinds => show({ kinds }, selected)} options={Object.keys(m.nodeKinds).map(value => ({ value, label: value }))} />
+        {options.focus && <Select aria-label={t('cg.hops')} value={asked.hops} onChange={hops => show({ hops }, selected)} options={[{ value: 1, label: t('cg.hop1') }, { value: 2, label: t('cg.hop2') }]} />}</>}
+      <Checkbox checked={asked.tests} onChange={e => show({ tests: e.target.checked }, selected)}>{t('cg.includeTests')}</Checkbox>
+      <Button onClick={() => { setSelected(''); instance.current?.zoomToFit(350, 35); }}>{t('cg.resetView')}</Button>
+      {loading && <Spin size="small" />}
+    </div>
+    <div className="cg-scope">
+      {options.focus ? <><span>{t('cg.neighbourhood')}</span><Tag closable onClose={e => { e.preventDefault(); show({ focus: '' }); }}>{page.nodes.find(n => n.id === options.focus)?.name ?? options.focus}</Tag></>
+        : <><a onClick={() => show({ scope: '' })}>{t('cg.all')}</a>{crumbs.map((part, i) => <span key={i}> / {i === crumbs.length - 1 ? part : <a onClick={() => show({ scope: crumbs.slice(0, i + 1).join('/') })}>{part}</a>}</span>)}</>}
+      {limited && <span className="caption cg-limited">{t('cg.limited', { nodes: page.nodes.length.toLocaleString(), totalNodes: page.total.nodes.toLocaleString(), links: page.links.length.toLocaleString(), totalLinks: page.total.links.toLocaleString() })}</span>}
     </div>
     <div className="cg-layout">
       <section className="cg-canvas-section">
         <div ref={host} className="cg-canvas" aria-label={t('cg.canvas')} />
-        <div className="cg-search"><Input.Search aria-label={t('cg.search')} placeholder={t('cg.searchPlaceholder')} allowClear value={query} onChange={e => setQuery(e.target.value)} /><span className="caption" data-testid="graph-counts">{t('cg.counts', { nodes: view.nodes.length, links: view.links.length })}</span></div>
-        {query && <div className="cg-results" aria-label={t('cg.results')}>{results.slice(0, 30).map(n => <button key={n.id} onClick={() => choose(n)}>{n.name}<small>{n.service} · {n.kind}</small></button>)}{!results.length && <p>{t('cg.noResults')}</p>}{results.length > 30 && <p>{t('cg.tooMany', { count: results.length })}</p>}</div>}
-        {!view.nodes.length && <p className="cg-empty">{t('cg.empty')}</p>}
+        <div className="cg-search"><Input.Search aria-label={t('cg.search')} placeholder={t('cg.searchPlaceholder')} allowClear value={query} onChange={e => setQuery(e.target.value)} /><span className="caption" data-testid="graph-counts">{t('cg.counts', { nodes: page.nodes.length, links: page.links.length })}</span></div>
+        {query && hits && <div className="cg-results" aria-label={t('cg.results')}>{hits.map(h => <button key={h.id} onClick={() => choose(h)}>{h.name}<small>{h.kind} · {h.filePath}{h.test ? ' · ' + t('cg.testTag') : ''}</small></button>)}{!hits.length && <p>{t('cg.noResults')}</p>}{hits.length === 30 && <p>{t('cg.tooManySearch')}</p>}</div>}
+        {!page.nodes.length && <p className="cg-empty">{t('cg.empty')}</p>}
         <div className="cg-legend">
-          {services.filter(s => !service || s === service).map(s => <span key={s}><i style={{ background: colors.get(s) }} />{s}</span>)}
+          {page.groups.filter(g => page.nodes.some(n => n.group === g)).map(g => <span key={g}><i style={{ background: colors.get(g) }} />{level === 'dir' ? groupLabel(g) : g}</span>)}
           <InfoTip>{t('cg.help')}</InfoTip>
         </div>
       </section>
       <aside className="cg-detail">
-        {!selectedGroup ? <p className="cg-placeholder">{t('cg.placeholder')}</p> : <>
-          <Tag>{selectedGroup.kind}</Tag><h3>{selectedGroup.name}</h3><p className="path">{selectedGroup.id}</p><p>{t('cg.rawSymbols', { count: selectedGroup.members.length })}</p>
-          {level === 'service' ? <Button onClick={() => { setService(selectedGroup.id); setLevel('file'); reset(); }}>{t('cg.browseFiles')}</Button> : level === 'file' ? <Button onClick={() => {
-            const seed = graph.nodes.find(n => n.filePath === selectedGroup.id && ['class', 'interface', 'function'].includes(n.kind));
-            setLevel('symbol'); setKinds([]); setSelected(seed?.id ?? ''); setFocus(seed?.id ?? '');
-          }}>{t('cg.expandNeighbourhood')}</Button> : <Space wrap><Button onClick={() => setFocus(selected)}>{t('cg.focusNeighbourhood')}</Button><Button onClick={() => setFocus('')}>{t('cg.showAllSymbols')}</Button></Space>}
-          {node && level !== 'service' && <><p className="path">{node.filePath}:{node.startLine}–{node.endLine}</p><p>{node.layer}</p>{node.signature && <pre>{node.signature}</pre>}
-            <h4>{t('cg.connections')} <span className="section-count">{connections.length}</span></h4>
-            <div className="cg-connections">{connections.slice(0, 40).map(e => {
-              const incoming = e.target === node.id, other = graph.nodes.find(n => n.id === (incoming ? e.source : e.target));
-              return other && <button key={e.id} onClick={() => { setService(''); setTests(tests || other.test); setKinds([]); setRelation(''); setLevel('symbol'); setSelected(other.id); setFocus(other.id); setCrossCalls(crossCalls || (e.crossService && e.kind === 'calls')); }}>
-                {incoming ? '←' : '→'} {e.kind} · {other.name}<small>{e.provenance ?? t('cg.provenanceUnknown')}{e.line ? ` · L${e.line}` : ''}</small>
-              </button>;
-            })}</div>
+        {!selectedNode ? <p className="cg-placeholder">{t('cg.placeholder')}</p> : <>
+          <Tag>{groupLabel(selectedNode.kind)}</Tag><h3>{level === 'symbol' ? selectedNode.name : selectedNode.id}</h3>
+          {level !== 'symbol' && <p>{t('cg.symbols', { count: selectedNode.members.toLocaleString() })}</p>}
+          <Space wrap>
+            {selectedNode.kind === 'dir' && <><Button onClick={() => show({ level: 'dir', scope: selectedNode.id, focus: '' })}>{t('cg.expandDir')}</Button><Button onClick={() => show({ level: 'file', scope: selectedNode.id, focus: '' })}>{t('cg.viewFiles')}</Button></>}
+            {selectedNode.kind === 'file' && <Button onClick={() => show({ level: 'symbol', scope: selectedNode.id, focus: '' })}>{t('cg.viewSymbols')}</Button>}
+            {level === 'symbol' && (options.focus === selectedNode.id ? <Button onClick={() => show({ focus: '' })}>{t('cg.clearFocus')}</Button> : <Button onClick={() => show({ focus: selectedNode.id }, selectedNode.id)}>{t('cg.focusNeighbourhood')}</Button>)}
+          </Space>
+          {node && <><p className="path">{node.filePath}:{node.startLine}–{node.endLine}</p>{node.signature && <pre>{node.signature}</pre>}
+            <h4>{t('cg.connections')} <span className="section-count">{detail!.total}</span></h4>
+            <div className="cg-connections">{detail!.connections.map(c => <button key={c.id + (c.incoming ? '<' : '>')} onClick={() => show({ level: 'symbol', focus: c.other.id, kinds: [], relation: '', tests: options.tests || c.other.test }, c.other.id)}>
+              {c.incoming ? '←' : '→'} {c.kind} · {c.other.name}<small>{c.provenance ?? t('cg.provenanceUnknown')}{c.line ? ` · L${c.line}` : ''}</small>
+            </button>)}{detail!.total > detail!.connections.length && <p className="caption">{t('cg.firstItems', { count: detail!.connections.length })}</p>}</div>
             <h4>{t('cg.snapshotSource')}{source && ` · L${source.startLine}–${source.endLine}`}</h4>{sourceError ? <Alert type="error" title={sourceError} /> : source ? <pre className="cg-source">{source.content.split('\n').map((line, i) => <span key={i} className={source.startLine + i >= node.startLine && source.startLine + i <= node.endLine ? 'cg-source-selected' : ''}><em>{source.startLine + i}</em>{line}{'\n'}</span>)}</pre> : <Spin />}
             {source && source.endLine < node.endLine && <p className="caption">{t('cg.sourcePreviewOnly')}</p>}</>}
         </>}
       </aside>
     </div>
-
   </div>;
 }

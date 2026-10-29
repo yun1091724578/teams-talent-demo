@@ -15,13 +15,14 @@ import { isDiagnosis, pendingCount } from '../demo/suggestions.ts';
 import { ArtifactStatus, CapIcon, CardGrid, EmptyState, Fields, FileMark, ItemCard, Section } from '../components/ui.tsx';
 import { DiffView, FileContent, FileList, IndexSummary, linkTarget } from '../components/files.tsx';
 import { SubmitDialog, SubmissionLink } from '../components/submit-pr.tsx';
+import { ApplyMcp } from '../components/codegraph-mcp.tsx';
 import type { Toolbar } from './level.tsx';
 
 // ---------- List ----------
 /** Published knowledge whose source changed after it was built; the capability must be able to update. */
 function staleChanges(st: TalentsState, a: Artifact) {
-  // An archived code graph is a committed snapshot shown independently of repository changes.
-  if (a.graphSnapshot) return null;
+  // A code graph shows its repository's index as it is: it is never out of date.
+  if (a.cap === 'codegraph') return null;
   if (a.draft || !capability(st, a.cap).update) return null;
   const c = changesSince(source(st, a.sources[0]), basisOf(a));
   return c && c.count ? c : null;
@@ -36,6 +37,9 @@ function basisRow(st: TalentsState, a: Artifact, basis: Basis | null | undefined
   if (!basis || !src) return null;
   return [currentT('rv.basedOn'), currentT('rv.basedOnValue', { name: src.name, version: basis.version ? versionLabel(basis.version) : currentT('rv.submitCommit', { commit: basis.commit ?? '' }) })];
 }
+
+/** A built code graph: not reviewed; "应用" gives the Code Agent its MCP server. */
+const isCodegraph = (a: Artifact) => a.cap === 'codegraph' && !!a.published;
 
 // Re-extract opens the task form prefilled from the task that built this artifact; it does not start a run.
 const reExtractHash = (a: Artifact) => levelHash(a.projectId, 'tasks', { new: '1', from: a.id });
@@ -57,10 +61,10 @@ export function LevelReview({ pid, toolbar }: { pid: string | null; toolbar: Too
     const docs = stale && source(st, a.sources[0])?.type === 'docs';
     const tag = todo ? (diagnosis ? <Tag color="warning">{t('rv.suggestionsPending', { count: n })}</Tag> : <ArtifactStatus a={a} />)
       : stale ? <Tooltip title={(docs ? versionLabel(stale.from) + ' → ' + versionLabel(stale.to) + '，' : '') + stale.text}><Tag color="warning">{docs ? t('rv.docsStale') : t('rv.codeStale')}</Tag></Tooltip> : null;
-    const footer = (a.published && !a.draft ? 'v' + a.published.version + ' · ' : '') + when(sortTime(a));
+    const footer = isCodegraph(a) ? t('cg.indexedAt', { date: when(sortTime(a)) }) : (a.published && !a.draft ? 'v' + a.published.version + ' · ' : '') + when(sortTime(a));
     return <ItemCard key={a.id} icon={<CapIcon cap={cap} />} title={a.name} subtitle={todo ? cap.name : undefined} extra={tag} onClick={() => open(a)} caption={footer}
       actions={todo ? <Button size="small" type="primary" onClick={() => open(a)}>{diagnosis ? t('rv.viewSuggestions') : t('rv.review')}</Button>
-        : stale ? <Button size="small" onClick={() => go(reExtractHash(a))}>{t('rv.reExtract')}</Button> : undefined}>
+        : stale ? <Button size="small" onClick={() => go(reExtractHash(a))}>{t('rv.reExtract')}</Button> : isCodegraph(a) ? <ApplyMcp size="small" /> : undefined}>
       {a.desc && <p className="ui-note one-line" title={a.desc}>{a.desc}</p>}
     </ItemCard>;
   };
@@ -115,7 +119,7 @@ export function Workbench({ id }: { id: string }) {
   else main = <FileContent st={st} a={a} file={file} text={K.text(a, which, file)} />;
 
   return <div className="wb">
-    <PageHeader title={a.name} description={cap.name} actions={<Space><ArtifactStatus a={a} />{(a.draft || (a.kind === 'files' && !a.submission)) && <Button type="primary" onClick={() => setPublishing(true)}>{K.isIndex(a) ? t('rv.enableRemoteIndex') : t('rv.submitPr')}</Button>}</Space>} />
+    <PageHeader title={a.name} description={isCodegraph(a) ? cap.name + ' · ' + a.published!.note : cap.name} actions={<Space><ArtifactStatus a={a} />{isCodegraph(a) && <ApplyMcp />}{(a.draft || (a.kind === 'files' && !a.submission)) && <Button type="primary" onClick={() => setPublishing(true)}>{K.isIndex(a) ? t('rv.enableRemoteIndex') : t('rv.submitPr')}</Button>}</Space>} />
     <div className={'wb-body' + (files.length ? '' : ' no-files')}>
       {files.length > 0 && <FileList current={file} onSelect={setFile} groups={K.fileGroups(a, files).map(g => ({ title: g.title, items: g.items.map(f => ({ key: f, indent: !!g.title, label: <>{K.fileLabel(f)}{mark(f)}</> })) }))} />}
       <section className="wb-main">
@@ -139,7 +143,7 @@ function PublishedSide({ st, a }: { st: TalentsState; a: Artifact }) {
   const { go } = useTalents();
   const t = useT();
   const p = a.published!, stale = staleChanges(st, a);
-  return <><h3>{K.isIndex(a) ? t('ui.remoteIndex') : a.submission ? t('ui.prCreated') : t('ui.hasVersion')}</h3>
+  return <><h3>{a.cap === 'codegraph' ? t('ui.codeGraph') : K.isIndex(a) ? t('ui.remoteIndex') : a.submission ? t('ui.prCreated') : t('ui.hasVersion')}</h3>
     <Fields rows={[[t('rv.version'), 'v' + p.version], [t('rv.generatedAt'), p.at], basisRow(st, a, p.basis), [t('rv.updateNote'), p.note]]} />
     {a.submission && <SubmissionLink submission={a.submission} />}
     {stale && <><StaleNote st={st} a={a} c={stale} /><div className="actions"><Button onClick={() => go(reExtractHash(a))}>{t('rv.reExtract')}</Button></div></>}

@@ -14,15 +14,14 @@ test('exports only published artifacts, at their published version', () => {
   assert.deepEqual(knowledge.artifacts.map(a => [a.id, a.version]), [['a-platinum-cashback-page', 1],
     ['a-req-2026-001', 1], ['a-req-2026-002', 1], ['a-req-2026-003', 1], ['a-req-2026-004', 1],
     ['a-req-2026-001-v2', 2], ['a-req-2026-002-v2', 2], ['a-req-2026-003-v2', 2], ['a-req-2026-004-v2', 2],
-    ['a-cg-java', 3], ['a-docidx', 2], ['a-biz', 1], ['a-std', 1], ['a-miner', 2]]);
+    ['a-docidx', 2], ['a-biz', 1], ['a-std', 1], ['a-miner', 2]]);
   // The coding standards are team-level knowledge; the rest belongs to the project.
-  assert.deepEqual(knowledge.artifacts.map(a => a.projectId), [...Array(12).fill('carddemo'), null, 'carddemo']);
+  assert.deepEqual(knowledge.artifacts.map(a => a.projectId), [...Array(11).fill('carddemo'), null, 'carddemo']);
   assert.deepEqual(knowledge.artifacts.find(a => a.id === 'a-std')!.agents, ['Code', 'Reviewer']);
   assert.ok(!('agents' in knowledge.artifacts.find(a => a.id === 'a-biz')!), 'knowledge meant for every agent lists none');
   const biz = knowledge.artifacts.find(a => a.id === 'a-biz')!;
   assert.equal(biz.capabilityName, '业务知识提取');
   assert.equal(biz.delivery, 'local');
-  assert.deepEqual(knowledge.artifacts.find(a => a.id === 'a-cg-java')!.files, []);
 });
 
 test('published files use the published text: v1 overrides and review revisions', () => {

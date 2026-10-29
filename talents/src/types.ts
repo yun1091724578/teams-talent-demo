@@ -61,7 +61,8 @@ export interface Task {
   context?: { skills: string[]; docs: string[]; note?: string };
   mode?: 'update' | 'build'; input?: { from: string; to: string }; schedule: Schedule; skipUnchanged?: boolean;
   prompt?: string; agent?: string;
-  run?: { startedAt: number; plan: RunPlan };
+  /** live: a real run on the service (a CodeGraph build): its plan holds the log so far, step the step it is in. */
+  run?: { startedAt: number; plan: RunPlan; live?: { step: number } };
   lastRun?: string; duration?: string; lastLogs?: string[];
   artifact?: string; produced?: string; unchanged?: boolean;
 }
@@ -81,7 +82,7 @@ export interface Artifact {
   id: string; projectId: string | null; cap: string; name: string; desc: string; sources: string[]; kind: 'index' | 'files' | 'diagnosis';
   files?: string[]; specs?: string[]; stats?: [string, string][]; folder?: string; skills?: string[]; usage?: string; mcpName?: string;
   sessions?: string[]; topic?: string;
-  /** The archived CodeGraph snapshot this code graph shows (server/codegraph.ts); set by the service, never saved. */
+  /** The generated CodeGraph graph this code graph shows (server/codegraph.ts); set by the service, never saved. */
   graphSnapshot?: string;
   /** A diagnosis: how each suggestion of the report (content/trajectory/<topic>/report.json) was handled. */
   suggestions?: SuggestionState[];

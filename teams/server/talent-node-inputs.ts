@@ -58,8 +58,10 @@ export async function talentNodeInputs(ctx:NodeInputContext,data:Pick<Presentati
   base.skills=await Promise.all(preset.skills.map(async id=>{
    return loadSkill(id,task?.skillBindings?.find(item=>item.id===id));
   }));
-  const selectedPublished:Record<RequirementNode,string[]>={prepare:['a-biz'],develop:['a-std','a-miner','a-cg-java'],verify:['a-std'],accept:['a-biz']};
-  for(const artifact of published.filter(item=>!!knownPreset&&item.projectId===projectId&&selectedPublished[nodeId].includes(item.id))){
+  // Code graphs are named for the repository Talents built them from: the development node takes the project's code graphs.
+  const selectedPublished:Record<RequirementNode,string[]>={prepare:['a-biz'],develop:['a-std','a-miner'],verify:['a-std'],accept:['a-biz']};
+  const selectedCapabilities:Partial<Record<RequirementNode,string[]>>={develop:['codegraph']};
+  for(const artifact of published.filter(item=>!!knownPreset&&item.projectId===projectId&&(selectedPublished[nodeId].includes(item.id)||!!selectedCapabilities[nodeId]?.includes(item.capability)))){
    const slot=artifact.id==='a-std'?'project-standards':nodeId==='prepare'?'business-documents':nodeId==='accept'?'acceptance-knowledge':'development-knowledge';
    const id=`talents-shared:${artifact.id}:v${artifact.version}`;
    base.knowledge.assets.push({id,title:artifact.name,version:String(artifact.version),detail:artifact.description,origin:'talents-shared',sourceProjectId:projectId,sourceRecordId:taskId,references:artifact.files.map(file=>({collection:'talents-shared',path:file.path,label:file.title}))});

@@ -9,20 +9,38 @@ import { HttpError } from './model.ts';
 import { clientState, ownedState, readSkill, readTeamsData, teamsRevision, teamsView, type TeamsData } from './teams-data.ts';
 import { KnowledgeExporter } from './export.ts';
 import { readContent } from './content.ts';
-import { codegraphSnapshot, withCodegraph, withoutCodegraph } from './codegraph.ts';
+import { codegraphArtifacts, codegraphSnapshot, codegraphUpdate, codegraphView, setLiveCodegraph, withCodegraph, withoutCodegraph } from './codegraph.ts';
+import { CodegraphRunner } from './codegraph-runs.ts';
+import { CodegraphInstaller } from './codegraph-install.ts';
+import { applyCodegraphMcp, codegraphMcpStatus } from './icode-agent.ts';
+import { graphPage, nodeDetail, searchGraph } from './codegraph-query.ts';
+import type { StoredGraphSnapshot } from '../../shared/codegraph.ts';
 import { defaultTarget, submitPullRequest } from './pull-requests.ts';
 
 const store = new Store(); await store.init();
 const submissions = new Set<string>();
 const exporter = new KnowledgeExporter(sharedDir);
-await exporter.export(store.state, true);
 const exportKnowledge = () => exporter.export(store.state).catch(error => console.error('Talents 知识导出失败：' + error.message));
+// CodeGraph builds run in the repositories bound in Teams; a build publishes the next version of the repository's code graph.
+// Installing CodeGraph and building with it exclude each other.
+const installer: CodegraphInstaller = new CodegraphInstaller({ blocked: (): string | null => codegraph.running() ? '有正在运行的代码图谱构建，请等它结束后再安装' : null });
+const codegraph: CodegraphRunner = await new CodegraphRunner({ directory: join(runtimeDir, 'codegraph'), onChange: () => void exportKnowledge(),
+  blocked: (): string | null => installer.installing() ? '正在安装 CodeGraph，请等安装结束后再构建' : null,
+  nextVersion: (projectId, sourceId) => (codegraphArtifacts(store.state).find(a => a.cap === 'codegraph' && a.projectId === projectId && a.sources[0] === sourceId)?.published?.version ?? 0) + 1 }).init();
+setLiveCodegraph(codegraph);
+await exporter.export(store.state, true);
 
 /** Whether Teams was read, its revision, and why not when it was not (src/types.ts TeamsInfo). */
 const teamsInfo = (teams: TeamsData) => ({ origin: teamsOrigin, online: teams.online, revision: teams.revision, error: teams.online ? undefined : teams.error });
 async function bootstrap() {
   const teams = await readTeamsData();
   return { revision: store.state.revision, state: clientState(withCodegraph(store.state), teams.snapshot), teams: teamsInfo(teams) };
+}
+/** The directory a repository is bound to in Teams; while Teams cannot be read, the one it was last built in. */
+async function repositoryPath(projectId: string, sourceId: string) {
+  const teams = await readTeamsData();
+  const bound = teams.snapshot.projects.find(p => p.id === projectId)?.repositories.find(r => r.id === sourceId)?.path;
+  return bound ?? (teams.online ? null : codegraph.build(projectId, sourceId)?.repository ?? null);
 }
 /** Teams data an action needs; fails while Teams cannot be read. */
 async function onlineTeams() {
@@ -84,13 +102,55 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         response.writeHead(200, { 'Content-Type': (TYPES[extname(key)] ?? 'text/plain') + '; charset=utf-8', 'Cache-Control': 'no-cache' }); response.end(text); return;
       }
       if (method === 'GET' && path === '/api/skill') { json(200, await readSkill(await onlineTeams(), url.searchParams.get('project') ?? '', url.searchParams.get('id') ?? '')); return; }
-      const codegraph = /^\/api\/codegraph\/([^/]+)(\/source)?$/.exec(path);
-      if (method === 'GET' && codegraph) {
-        const graph = codegraphSnapshot(decodeURIComponent(codegraph[1]));
-        if (!graph) throw new HttpError('该项目暂无代码图谱快照', 404);
-        if (!codegraph[2]) { const { sources, ...rest } = graph; json(200, rest); return; }
-        if (url.searchParams.get('snapshot') !== graph.metadata.snapshotId) throw new HttpError('图谱已更新，请刷新后重试', 409);
-        const node = graph.nodes.find(n => n.id === url.searchParams.get('id'));
+      // CodeGraph runs: each run's task patch and the code graph artifacts; POST starts a build in the repository bound in Teams.
+      if (method === 'GET' && path === '/api/codegraph-runs') { json(200, codegraphUpdate(store.state)); return; }
+      if (method === 'POST' && path === '/api/codegraph-runs') {
+        const body = await bodyJson(request);
+        if (![body.taskId, body.projectId, body.sourceId].every(v => typeof v === 'string' && v)) throw new HttpError('缺少任务、项目或代码仓', 400);
+        const project = (await onlineTeams()).projects.find(p => p.id === body.projectId);
+        const repo = project?.repositories.find(r => r.id === body.sourceId);
+        if (!project || !repo) throw new HttpError('iCode Teams 中没有这个代码仓', 404);
+        if (!repo.path) throw new HttpError('代码仓 ' + repo.name + ' 未在 iCode Teams 绑定本机目录', 400);
+        codegraph.start({ taskId: body.taskId, projectId: project.id, sourceId: repo.id, repository: repo.path, repoName: repo.name });
+        json(200, codegraphUpdate(store.state)); return;
+      }
+      // CodeGraph on this machine: whether its self-check passes (?check=1 checks again), and installing it.
+      if (method === 'GET' && path === '/api/engines/codegraph') { json(200, await installer.state(url.searchParams.get('check') === '1')); return; }
+      if (method === 'POST' && path === '/api/engines/codegraph/install') { await bodyJson(request); installer.install(); json(200, await installer.state()); return; }
+      // "应用": whether iCode's Code Agent has the codegraph MCP server, and adding it.
+      if (method === 'GET' && path === '/api/codegraph-mcp') { json(200, await codegraphMcpStatus()); return; }
+      if (method === 'POST' && path === '/api/codegraph-mcp') { await bodyJson(request); json(200, await applyCodegraphMcp()); return; }
+      // A code graph: the repository's index as it is now (generated again when it changed).
+      // The page asks for one view at a time. Opening (no snapshot) reads the index again when it changed; later requests
+      // name the snapshot they belong to and get 409 once the graph has been generated again.
+      const graphPath = /^\/api\/codegraph\/([^/]+)(?:\/(source|search|node))?$/.exec(path);
+      if (method === 'GET' && graphPath) {
+        const projectId = decodeURIComponent(graphPath[1]), sourceId = url.searchParams.get('source'), snapshot = url.searchParams.get('snapshot');
+        let graph: StoredGraphSnapshot, notice: string | undefined;
+        if (snapshot === null && !graphPath[2]) {
+          const view = await codegraphView(projectId, sourceId, sourceId && await repositoryPath(projectId, sourceId));
+          if (!view) throw new HttpError('还没有代码图谱：在“知识任务”中新建 CodeGraph 任务构建', 404);
+          ({ graph, notice } = view);
+        } else {
+          const current = codegraphSnapshot(projectId, sourceId);
+          if (!current) throw new HttpError('还没有代码图谱', 404);
+          if (snapshot !== current.metadata.snapshotId) throw new HttpError('图谱已更新，请刷新后重试', 409);
+          graph = current;
+        }
+        const param = (name: string) => url.searchParams.get(name) ?? undefined;
+        if (!graphPath[2]) {
+          const level = param('level'), tests = param('tests');
+          json(200, { metadata: graph.metadata, notice, ...graphPage(graph, { level: level === 'dir' || level === 'file' || level === 'symbol' ? level : undefined,
+            scope: param('scope'), tests: tests === undefined ? undefined : tests === '1', kinds: param('kinds')?.split(',').filter(Boolean),
+            relation: param('relation'), focus: param('focus'), hops: Number(param('hops') ?? 1) }) }); return;
+        }
+        if (graphPath[2] === 'search') { json(200, searchGraph(graph, param('q') ?? '', param('tests') === '1')); return; }
+        if (graphPath[2] === 'node') {
+          const detail = nodeDetail(graph, param('id') ?? '');
+          if (!detail) throw new HttpError('符号不存在', 404);
+          json(200, detail); return;
+        }
+        const node = nodeDetail(graph, param('id') ?? '', 0)?.node;
         if (!node) throw new HttpError('符号不存在', 404);
         const source = graph.sources[node.filePath];
         if (source === undefined) throw new HttpError('快照中没有此源码', 404);
@@ -105,6 +165,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         json(200, { revision: state.revision }); return;
       }
       if (method === 'POST' && path === '/api/reset') {
+        await codegraph.clear();
         await store.reset();
         await exportKnowledge();
         json(200, await bootstrap()); return;
@@ -162,4 +223,4 @@ server.listen(port, '127.0.0.1', () => {
   console.log('Talents: ' + origin + '/talents');
   console.log('共享数据目录：' + sharedDir);
 });
-for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { server.close(() => process.exit(0)); });
+for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { codegraph.stop(); installer.stop(); server.close(() => process.exit(0)); });
