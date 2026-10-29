@@ -67,7 +67,7 @@ export const getTalentsKnowledge = (projectId: string) => tracedJson<{ talentsOr
 export const getTalentsFile = (artifact: Pick<PublishedArtifact, 'id' | 'version'>, path: string) => tracedJson<PublishedFile & { content: string }>('teams', '/api/talents/file?' + new URLSearchParams({ artifact: artifact.id, version: String(artifact.version), path }));
 
 export const getProjectWork = (role: Role, target: import('./project-work.js').ProjectWorkSelection) => tracedJson<import('./project-work.js').ProjectWorkPlan>('teams', '/api/project-work?' + new URLSearchParams({ role, ...target }).toString());
-export const bindProjectWork = (role: Role, target: import('./project-work.js').ProjectWorkSelection, directory: string) => native<import('./project-work.js').ProjectWorkPlan>(role, 'work-bind', { target, directory });
+export const bindProjectWork = (role: Role, target: import('./project-work.js').ProjectWorkSelection, directory: string, mode: 'auto' | 'directory' = 'auto') => native<import('./project-work.js').ProjectWorkPlan>(role, 'work-bind', { target, directory, mode });
 export const startProjectWork = (role: Role, request: {requestId: string; target: import('./project-work.js').ProjectWorkSelection; action: import('./project-work.js').ProjectWorkAction; planToken: string}) => native<import('./project-work.js').ProjectWorkReceipt>(role, 'work-start', request);
 
 export const getSkillApplication = (role: Role, scope: import('./skill-application.js').SkillApplicationScope) => tracedJson<import('./skill-application.js').SkillApplicationPlan>('teams', '/api/skill-application?' + new URLSearchParams({ role, ...scope }));
