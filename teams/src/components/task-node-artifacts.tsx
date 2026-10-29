@@ -32,7 +32,7 @@ export function TaskNodeArtifacts({ items, onSource, scope }: { items: TaskNodeI
       <p className="task-artifact-meta" title={reference.sourceLabel + ' · ' + (reference.version ?? '未登记版本')}>{reference.sourceLabel}{reference.version ? ' · ' + reference.version : ' · 版本未登记'}</p>
       {reference.codeVersion && <p className="task-artifact-meta" title={reference.codeVersion}>代码版本 · {reference.codeVersion}</p>}
       <Space size={8} wrap><Button type="link" size="small" onClick={() => open(reference)}>查看引用</Button>{reference.sourceNode && <Button type="link" size="small" onClick={() => onSource(reference.sourceNode!)}>来源：{taskNodeDefinitions[reference.sourceNode].label}</Button>}</Space>
-    </div>) : <p className="task-artifact-missing">{item.status === 'unregistered' ? '现有记录未登记此项产物或输入。' : '等待提交可追踪的资料与版本。'}</p>}
+    </div>) : <p className="task-artifact-missing">{item.id === 'confirmations' ? '尚未登记确认依据；由 Owner 在输入区登记。' : item.status === 'unregistered' ? '现有记录未登记此项产物或输入。' : '等待提交可追踪的资料与版本。'}</p>}
     {item.references.length > 2 && <Button type="link" size="small" className="task-artifact-more" onClick={() => showText(item.label + ' · 全部引用', item.references.map(details).join('\n\n'))}>查看全部 {item.references.length} 项</Button>}
   </section>)}</div><Drawer open={!!selected&&selectionScope===scopeKey} onClose={()=>{request.current++;setSelected(null);}} title={selected?artifactLabel(selected):undefined} width={880} destroyOnHidden>
     <div data-task-artifact-viewer={selected?.id} data-artifact-task={scope?.taskId}>

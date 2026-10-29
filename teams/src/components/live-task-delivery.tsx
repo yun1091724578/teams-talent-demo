@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Alert, Button, Collapse, Empty, Input, List, Modal, Space, Tag, Typography } from 'antd';
 import { taskNodeView } from '../task-node-contract.js';
 import { TaskNodeArtifacts, TaskCompletionCriteria, nodeArtifactSummary } from './task-node-artifacts.js';
+import { RequirementConfirmations } from './requirement-confirmations.js';
 import { useDemo } from '../context.js';
 import { type DeliveryRequirement, type RequirementNode } from '../delivery-requirements.js';
 import { deliveryRequirementAction } from '../api.js';
@@ -76,6 +77,7 @@ export function LiveTaskDelivery({ task, node, sidebarItems }: { task: DeliveryR
     flow={<TaskDeliveryFlow scope={scope} selected={node} onSelect={go} nodeInputs={inputsRead.value} nodes={(Object.keys(deliveryNodeLabels) as RequirementNode[]).map(id => ({ id, label: deliveryNodeLabels[id], role: id === 'accept' ? 'Owner' : member?.name ?? '待分配', description: '', statusTone: id === 'prepare' && preparation && task.nodes[id].status === 'pending' ? preparation.status === 'ready' && !preparationReady(preparation) ? 'processing' : preparationStatusTones[preparation.status] : nodeStatusTones[task.nodes[id].status], status: id === 'prepare' && preparation && task.nodes[id].status === 'pending' ? preparationStatusLabel(preparation) : task.nodes[id].status === 'complete' && task.legacyBasis && !hasCurrentBasis(id) ? '历史完成' : statusLabels[task.nodes[id].status], running: task.nodes[id].status === 'running' || id === 'prepare' && preparation?.status === 'preparing-session', complete: task.nodes[id].status === 'complete' && !(task.legacyBasis && !hasCurrentBasis(id)), summary: nodeArtifactSummary(taskNodeView(state, task, id, data)) }))} />}
     sections={{ input: { action: <Tag>{inputState}</Tag>, content: <>
           <p className="task-node-requirement">{awaitingKnowledge ? task.description : firstSentence(task.description)}</p>
+          <RequirementConfirmations key={task.projectId + ':' + task.id + ':' + role} task={task} />
           {awaitingKnowledge ? <><p className="muted">{nodeKnowledge.status === 'waiting-upstream' ? node === 'develop' ? 'PRD 确认后自动获取开发知识与 Skill。' : '开发成果提交后自动获取测试知识与 Skill。' : nodeKnowledge.status === 'running' ? '正在获取本节点相关知识与 Skill，完成后自动显示。' : nodeKnowledge.status === 'failed' ? '知识获取未完成，可在下方对应知识节点查看原因。' : '等待自动获取本节点相关知识与 Skill。'}</p>{node !== 'prepare' && <TaskNodeArtifacts scope={{...scope,nodeId:node}} items={view.inputs.filter(item => item.references.some(reference => !!reference.sourceNode))} onSource={go} />}</> : <>
           {inputsRead.error&&<Alert type="warning" title="Talent 节点输入读取未完成" description={inputsRead.error} action={<Button onClick={inputsRead.refresh}>重新获取</Button>}/>}
           {!inputsRead.pending&&<Space><span className="muted">{inputsRead.value?.selection.note}</span><Button type="link" size="small" onClick={inputsRead.refresh}>重新获取节点输入</Button></Space>}
@@ -108,7 +110,7 @@ export function LiveTaskDelivery({ task, node, sidebarItems }: { task: DeliveryR
     materials={<>      <h4>需求说明</h4>
       <div className="task-material-description">{task.description.split(/(?<=。)|\n/).filter(part => part.trim()).map((part, index) => <p key={index}>{part.trim()}</p>)}</div>
       <h4>验收标准</h4>
-      <p className="muted">尚未单独登记验收标准。以本任务说明和确认记录为准。</p>
+      <p className="muted">{task.confirmations?.length ? '以本任务说明与已登记的 ' + task.confirmations.length + ' 项确认依据为准；未登记事项仍为待确认。' : '尚未单独登记验收标准。以本任务说明和确认记录为准。'}</p>
       {task.legacyBasis && <><p className="muted">本任务保留历史迁移依据，与本轮执行记录分别展示。</p><Button type="link" size="small" onClick={() => detail('历史迁移依据', JSON.stringify(task.legacyBasis, null, 2))}>查看历史依据</Button></>}
 </>}
   >

@@ -7,7 +7,7 @@ import { checkedNode } from './talent-node-inputs.js';
 import { projectMembers } from '../src/teams-domain.js';
 import { createTaskSessionStream } from './task-session-stream.js';
 import type { TaskSessionStreamQuery } from '../src/task-session-stream.js';
-import { assignDeliveryRequirement, createDeliveryRequirement, deliveryRequirement, acceptDeliveryRequirement, returnDeliveryRequirement, requireDeliveryMember } from '../src/delivery-requirements.js';
+import { assignDeliveryRequirement, createDeliveryRequirement, deliveryRequirement, acceptDeliveryRequirement, returnDeliveryRequirement, requireDeliveryMember, updateRequirementConfirmations } from '../src/delivery-requirements.js';
 import { queueTaskCollection, queueTaskPreparation, taskAutomation } from '../src/task-automation.js';
 import { TaskAutomationService } from './task-automation.js';
 import { TaskPreparationService } from './task-preparation.js';
@@ -158,8 +158,9 @@ const server = createServer(async (request, response) => {
           else {const task=deliveryRequirement(next,body.projectId,body.taskId);if(!task)throw new DomainError('交付需求不存在',404);
             if(body.action==='accept'){acceptDeliveryRequirement(next,body.role,task,at);queueTaskCollection(next,{projectId:task.projectId,taskId:task.id},at);}
             else if(body.action==='return')returnDeliveryRequirement(body.role,task,body.reason,at);
-            else throw new DomainError('未知需求操作');detail=task.id+' · '+body.action;}
-          next.revision++;next.audit.push({id:next.revision,at,role:body.role,system:'Teams',action:body.action==='create'?'创建交付需求':body.action==='assign'?'分配交付需求':body.action==='accept'?'Owner验收通过':'Owner退回补充',detail,origin:'simulated'});return next;
+            else if(body.action==='confirm'){updateRequirementConfirmations(next,body.role,body.projectId,body.taskId,body.confirmations,at);detail=task.id+' · '+(task.confirmations?.length??0)+' 项确认依据';}
+            else throw new DomainError('未知需求操作');}
+          next.revision++;next.audit.push({id:next.revision,at,role:body.role,system:'Teams',action:body.action==='create'?'创建交付需求':body.action==='assign'?'分配交付需求':body.action==='accept'?'Owner验收通过':body.action==='confirm'?'登记确认依据':'Owner退回补充',detail,origin:'simulated'});return next;
         });json(200,saved);
         if(['create','assign'].includes(body.action))void taskPreparationService.schedule({projectId:body.input.projectId,taskId:body.action==='create'?body.input.id:body.input.taskId}).catch(error=>console.error('自动准备未完成：'+error.message));
         if(body.action==='accept')void taskAutomationService.collect({projectId:body.projectId,taskId:body.taskId}).catch(error=>console.error('需求验收已保存，自动收集未完成：'+error.message));return;
