@@ -1,6 +1,7 @@
 // Simulated task runs. A run lasts `seconds`; its steps and log lines are revealed as time passes.
 // Logs follow the real engines' output (Talents engines/, the trajectory analyser in bank-report-handoff);
 // nothing is executed. Finishing a run produces (or updates) an artifact.
+// CodeGraph is the exception: it is built for real by the service in the repository bound in Teams.
 import type { Artifact, Capability, Draft, RunPlan, Session, Source, TalentsState, Task } from '../types.ts';
 import { content } from '../content.ts';
 import { hashId, now, num, uid, versionLabel } from './format.ts';
@@ -8,6 +9,9 @@ import { basisOf, capability, changesSince, latestVersion, minerFiles, session, 
 import { engineOf, operationText } from './engine.ts';
 import { report } from './suggestions.ts';
 
+
+/** Capabilities whose runs the service executes for real (CodeGraph); the others are simulated here. */
+export const runsOnService = (cap: string) => cap === 'codegraph';
 
 /** The artifact a run of this task would build or update (same level, same capability on the same input);
  *  every diagnosis run makes a new one. */
@@ -50,24 +54,8 @@ export function runPlan(st: TalentsState, t: Task): RunPlan {
   if (t.cap === 'traj') return trajPlan(st, t, sid);
   if (cap.custom) return customPlan(st, t, cap, src, update, sid);
 
-  if (t.cap === 'codegraph') {
-    const a = existingArtifact(st, t), stat = (label: string) => a?.stats?.find(s => s[0] === label)?.[1] ?? '';
-    const P = '[icode-knowledge-codegraph]', repo = src?.path ?? '', sync = !!a;
-    p.step('自检');
-    preamble(p.log, cap, t, src, update);
-    p.log(K + ' 自检：python3 scripts/run.py --check', P + ' 自检通过：codegraph 1.6.0（codegraph --version）');
-    p.step(sync ? '同步代码图谱' : '建立代码图谱');
-    p.log(P + ' 代码版本：分支 ' + (src?.branch ?? 'main') + '，提交 ' + short(src?.commit?.sha) + '；上次成功的构建或更新：' + (sync ? (t.input?.from ?? short(src?.commit?.sha)) : '无记录'));
-    if (sync) p.log(P + ' 运行：codegraph sync ' + repo,
-      'Detecting changes since last sync… ' + (ch?.count ? ch.count + ' commits, 14 files changed (11 modified, 3 added)' : 'no changes'),
-      ...(ch?.count ? ['Re-parsing 14 files…', 'Updated 212 symbols, 486 references'] : []));
-    else p.log(P + ' 运行：codegraph init ' + repo + ' --yes', 'Scanning files… ' + (stat('文件') || '412') + ' files', 'Parsing symbols… ' + (stat('节点') || '3,918') + ' nodes',
-      'Resolving references… ' + (stat('关系') || '9,204') + ' edges', 'Index written to .codegraph/codegraph.db');
-    p.step('校验索引');
-    p.log(P + ' 运行：codegraph status ' + repo + ' --json',
-      P + ' 完成：' + repo + ' 的索引已校验通过（' + (sync ? 'sync' : 'init') + '）。', K + ' 进程退出，退出码 0');
-    return p.done(sync ? 6 : 9);
-  }
+  // A CodeGraph build runs on the service (server/codegraph-runs.ts); its task keeps the real log.
+  if (runsOnService(t.cap)) return p.done(0);
   if (t.cap === 'doc-index') {
     const P = '[icode-knowledge-rag]', touched = ch ? (ch.added?.length ?? 0) + (ch.modified?.length ?? 0) : 0;
     p.step('自检');
@@ -218,6 +206,8 @@ export interface Progress { pct: number; step: number; done: boolean; logs: stri
 export function runProgress(t: Task, at = Date.now()): Progress {
   const r = t.run;
   if (!r) return { pct: 100, step: 99, done: true, logs: [] };
+  // A run on the service ends when the service says so.
+  if (r.live) return { pct: Math.round((r.live.step + 0.5) / r.plan.steps.length * 100), step: r.live.step, done: false, logs: r.plan.logs };
   const f = Math.min(1, (at - r.startedAt) / (r.plan.seconds * 1000));
   const steps = r.plan.steps.length;
   const logCount = Math.max(1, Math.ceil(f * r.plan.logs.length));

@@ -7,6 +7,4 @@
 # Fixed historical document/source samples are separate from live business checkouts.
 /teams/fixtures/project-documents/** -text
 /talents/tests/fixtures/carddemo-source-snapshot.json -text
-# Archived CodeGraph snapshots retain the manifest checksums on every platform.
-/talents/data/codegraph/**/snapshots/** -text
 /teams/tests/fixtures/unexecuted-java-unit-report.md -text

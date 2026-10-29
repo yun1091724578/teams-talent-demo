@@ -7,7 +7,7 @@ import { useTalents } from '../store.tsx';
 import { levelHash } from '../navigation.ts';
 import type { Capability, Session, TalentsState, Task } from '../types.ts';
 import { artifact, basisOf, capability, changesSince, levelName, levelSessions, levelSources, member, memberName, project, session, source, task, taskName } from '../demo/model.ts';
-import { cancelRun, existingArtifact, runPlan, runProgress, startRun } from '../demo/runs.ts';
+import { cancelRun, existingArtifact, runPlan, runProgress, runsOnService, startRun } from '../demo/runs.ts';
 import { askICode } from '../demo/ask-icode.ts';
 import { now, tokens, uid, versionLabel, when } from '../demo/format.ts';
 import { CapIcon, CardGrid, EmptyState, Fields, InfoTip, ItemCard, Section } from '../components/ui.tsx';
@@ -58,11 +58,14 @@ function contextText(st: TalentsState, t: Task) {
 
 /** Run, cancel, pause and delete, shared by the cards and the detail. Cancelling and deleting ask first. */
 function useTaskActions() {
-  const { state: st, update, toast } = useTalents();
+  const { state: st, update, toast, startCodegraph } = useTalents();
   const { modal } = App.useApp();
   const me = member(st, st.team.me)?.name ?? '管理员';
   return {
-    run(id: string) { update(d => startRun(d, task(d, id)!)); toast('已开始运行'); },
+    run(id: string) {
+      if (runsOnService(task(st, id)!.cap)) { startCodegraph(id).then(() => toast('已开始构建'), e => toast('无法开始构建：' + (e as Error).message)); return; }
+      update(d => startRun(d, task(d, id)!)); toast('已开始运行');
+    },
     cancel(id: string) {
       const t = task(st, id)!;
       modal.confirm({ title: '取消这次运行？', okText: '取消运行', okButtonProps: { danger: true }, cancelText: '继续运行',
@@ -107,7 +110,8 @@ export function LevelTasks({ pid, toolbar }: { pid: string | null; toolbar: Tool
   };
   const card = (t: Task) => {
     const cap = capability(st, t.cap), running = t.status === 'running', p = running ? runProgress(t, clock) : null;
-    const buttons = running ? <Button size="small" danger onClick={() => actions.cancel(t.id)}>取消运行</Button>
+    // A CodeGraph build is not cancelled: stopping codegraph midway can leave an index it refuses to update.
+    const buttons = running ? !t.run?.live && <Button size="small" danger onClick={() => actions.cancel(t.id)}>取消运行</Button>
       : isDaily(t) ? <><PauseButton t={t} size="small" onClick={() => actions.pause(t.id, !t.paused)} /><Button size="small" onClick={() => run(t.id)}>立即运行一次</Button></>
       : isDone(t) ? <Button size="small" onClick={() => setForm({ copy: t.id })}>复制为新任务</Button>
       : <Button size="small" onClick={() => run(t.id)}>立即运行</Button>;
@@ -150,10 +154,10 @@ function TaskDetail({ id, onClose, onRun, onCopy }: { id: string; onClose(): voi
   const p = running ? runProgress(t, clock) : null;
   const a = artifact(st, t.produced ?? t.artifact);
   useEffect(() => { if (log.current) log.current.scrollTop = log.current.scrollHeight; });
-  const outcome = a && (isDiagnosis(a) ? '诊断完成，' + (a.suggestions ?? []).length + ' 条优化建议，' + pendingCount(a) + ' 条待提交' : !a.draft ? (t.unchanged ? '来源没有变化，保持 v' + a.published!.version : (a.published!.auto ? '远端索引已更新 v' : '已生成 v') + a.published!.version)
+  const outcome = a && (isDiagnosis(a) ? '诊断完成，' + (a.suggestions ?? []).length + ' 条优化建议，' + pendingCount(a) + ' 条待提交' : !a.draft ? (t.unchanged ? '来源没有变化，保持 v' + a.published!.version : (a.cap === 'codegraph' ? '代码图谱已更新' : (a.published!.auto ? '远端索引已更新 v' : '已生成 v') + a.published!.version))
     : a.published ? '原产物的新版本，等待审阅后提交' : '新产物，等待审阅后提交');
   return <Drawer open width={560} onClose={onClose} title={<div><div className="caption">{cap.name}</div>{taskName(st, t)}</div>}
-    footer={<div className="drawer-foot">{running ? <><span className="spacer" /><Button danger onClick={() => actions.cancel(t.id)}>取消运行</Button></> : <>
+    footer={<div className="drawer-foot">{running ? <><span className="spacer" />{!t.run?.live && <Button danger onClick={() => actions.cancel(t.id)}>取消运行</Button>}</> : <>
       <Button danger onClick={() => actions.remove(t.id, onClose)}>删除</Button><span className="spacer" />
       {isDaily(t) && <PauseButton t={t} onClick={() => actions.pause(t.id, !t.paused)} />}
       {isDone(t) ? <Button onClick={onCopy}>复制为新任务</Button> : <Button onClick={onRun}>{isDaily(t) ? '立即运行一次' : '立即运行'}</Button>}
@@ -252,7 +256,7 @@ function PrPicker({ repoId, initial, onDone, onClose }: { repoId: string; initia
 interface Preset { cap?: string; source?: string; from?: string; copy?: string }
 /** level: the team (null) or project the task belongs to; undefined lets the user choose (from 知识能力). */
 export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?: string | null; preset: Preset; onClose(): void; onCreated(id: string, started: boolean, level: string | null): void }) {
-  const { state: st, update, focusProject } = useTalents();
+  const { state: st, update, focusProject, startCodegraph, toast } = useTalents();
   // "重新提取" on an artifact: start from the task that built it.
   const fromArtifact = artifact(st, preset.from);
   const copied = task(st, preset.copy);
@@ -273,17 +277,20 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
   const [ctxSkills, setCtxSkills] = useState<string[]>(copied?.context?.skills ?? []), [ctxDocs, setCtxDocs] = useState<string[]>(copied?.context?.docs ?? []), [ctxNote, setCtxNote] = useState(copied?.context?.note ?? '');
   const [picking, setPicking] = useState<'sessions' | 'prs' | null>(null);
 
+  // A CodeGraph build runs now, in the repository as it is: it has no schedule and no update/rebuild choice.
+  const onService = runsOnService(capId);
   const own = levelSources(st, level), repos = own.filter(s => s.type === 'repo' && s.bound);
   const pool = cap.input === 'docs' ? own.filter(s => s.type === 'docs') : cap.input === 'repo+pr' ? repos.filter(s => s.prs) : repos;
   const src = cap.input === 'sessions' ? 's-sessions' : pool.some(s => s.id === chosen) ? chosen : pool[0]?.id ?? null;
   // Update vs rebuild: only when the capability declares an update and this input already has knowledge.
   const modeInfo = (() => {
-    if (!cap.update || !src || cap.input === 'sessions') return null;
+    if (!cap.update || !src || cap.input === 'sessions' || onService) return null;
     const a = existingArtifact(st, { projectId: level, cap: capId, sources: [src] }), basis = a && basisOf(a);
     return basis ? { artifact: a!, changes: changesSince(source(st, src), basis) } : null;
   })();
 
-  let ok = !!src, hint = src ? '' : levelName(st, level) + '还没有' + (cap.input === 'docs' ? '文档集' : cap.input === 'repo+pr' ? '有 PR 记录的代码仓' : '代码仓');
+  let ok = !!src, hint = src ? '' : cap.input !== 'docs' && own.some(s => s.type === 'repo' && !s.bound) && !repos.length ? '代码仓还没有在 iCode Teams 绑定本机目录'
+    : levelName(st, level) + '还没有' + (cap.input === 'docs' ? '文档集' : cap.input === 'repo+pr' ? '有 PR 记录的代码仓' : '代码仓');
   if (modeInfo && mode === 'update' && schedule !== 'daily' && modeInfo.changes && !modeInfo.changes.count) { ok = false; hint = '来源没有变化，无需更新'; }
   if (cap.input === 'sessions') { ok = sessions.length > 0; hint = ok ? '' : '请选择会话'; }
   if (cap.input === 'repo+pr' && src) { ok = prs.length > 0; hint = ok ? '' : '请选择 PR'; }
@@ -307,6 +314,12 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
     if (cap.params?.length) t.params = Object.fromEntries(cap.params.map(p => [p.name, p.type === 'array' ? String(values[p.name] ?? '').split('\n').map(x => x.trim()).filter(Boolean) : values[p.name] ?? (p.type === 'boolean' ? false : '')]));
     if (cap.input === 'sessions' && (ctxSkills.length || ctxDocs.length || ctxNote.trim())) t.context = { skills: ctxSkills, docs: ctxDocs, note: ctxNote.trim() || undefined };
     if (t.schedule.kind === 'daily' && cap.input !== 'sessions') t.skipUnchanged = skip;
+    if (onService) {
+      t.schedule = { kind: 'now' }; delete t.skipUnchanged;
+      update(d => { d.tasks.unshift(t); });
+      startCodegraph(id).catch(e => toast('无法开始构建：' + (e as Error).message));
+      onCreated(id, true, level); return;
+    }
     update(d => { d.tasks.unshift(t); if (schedule === 'now') startRun(d, d.tasks[0]); });
     onCreated(id, schedule === 'now', level);
   };
@@ -318,7 +331,7 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
   })();
 
   return <Drawer open width={560} title={fixed === undefined ? '新建任务' : <div><div className="caption">{levelName(st, level)}</div>{copied ? '复制为新任务' : '新建任务'}</div>} onClose={onClose}
-    footer={<div className="drawer-foot"><span className="ui-note">{hint}</span><span className="spacer" /><Button onClick={onClose}>取消</Button><Button type="primary" disabled={!ok} onClick={submit}>{schedule === 'now' ? '创建并运行' : '创建'}</Button></div>}>
+    footer={<div className="drawer-foot"><span className="ui-note">{hint}</span><span className="spacer" /><Button onClick={onClose}>取消</Button><Button type="primary" disabled={!ok} onClick={submit}>{schedule === 'now' || onService ? '创建并运行' : '创建'}</Button></div>}>
     <div className="form-body">
       {fixed === undefined && <div className="field"><span className="label">所属 <InfoTip>任务只能使用所属层级的来源，产出的知识也归属这一层级。</InfoTip></span>
         <Select value={level ?? ''} onChange={v => changeLevel(v || null)} options={[{ value: '', label: '团队' }, ...st.projects.map(p => ({ value: p.id, label: p.name }))]} />
@@ -354,10 +367,11 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
           <Radio value="build"><b>重新构建</b></Radio>
         </Radio.Group></div>}
       <div className="field"><span className="label">时间{schedule === 'daily' && cap.input === 'sessions' && <> <InfoTip>每天分析新共享的会话；首次运行分析上面选择的会话。</InfoTip></>}</span>
-        <Select value={schedule} onChange={setSchedule} options={[{ value: 'now', label: '立即执行' }, { value: 'once', label: '指定时间执行一次' }, { value: 'daily', label: '每天定时' }]} />
-        {schedule === 'once' && <Input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} />}
-        {schedule === 'daily' && <Input type="time" value={time} onChange={e => setTime(e.target.value)} />}
-        {schedule === 'daily' && cap.input !== 'sessions' && <Checkbox checked={skip} onChange={e => setSkip(e.target.checked)}>来源没有变化时跳过</Checkbox>}
+        <Select value={onService ? 'now' : schedule} onChange={setSchedule} disabled={onService} options={[{ value: 'now', label: '立即执行' }, { value: 'once', label: '指定时间执行一次' }, { value: 'daily', label: '每天定时' }]} />
+        {onService && <span className="caption">在 iCode Teams 绑定的本机目录中按当前代码构建，不切换分支、不拉取远端。</span>}
+        {schedule === 'once' && !onService && <Input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} />}
+        {schedule === 'daily' && !onService && <Input type="time" value={time} onChange={e => setTime(e.target.value)} />}
+        {schedule === 'daily' && !onService && cap.input !== 'sessions' && <Checkbox checked={skip} onChange={e => setSkip(e.target.checked)}>来源没有变化时跳过</Checkbox>}
       </div>
       <label className="field"><span className="label">名称</span>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder={taskName(st, { cap: capId, sources: src ? [src] : [], sessions: cap.input === 'sessions' ? sessions : undefined })} /></label>

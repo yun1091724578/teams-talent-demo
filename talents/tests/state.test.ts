@@ -87,11 +87,22 @@ test('restarting takes the current built-in capabilities and keeps imported ones
 test('restarting renames the index artifacts stored under their old names, and nothing else', async () => {
   const path = join(await mkdtemp(join(tmpdir(), 'talents-store-')), 'state.json');
   const first = new Store(path); await first.init();
-  await first.mutate(first.state.revision, s => ({ ...s, artifacts: s.artifacts.map(a => a.id === 'a-cg-java' ? { ...a, name: 'carddemo-java-1025 CodeGraph' } : a.id === 'a-docidx' ? { ...a, name: '自定义名称' } : a) }));
+  await first.mutate(first.state.revision, s => ({ ...s, artifacts: s.artifacts.map(a => a.id === 'a-docidx' ? { ...a, name: '自定义名称' } : a) }));
   const again = new Store(path); await again.init();
-  assert.equal(again.state.artifacts.find(a => a.id === 'a-cg-java')!.name, 'carddemo-java-1025 代码图谱');
   assert.equal(again.state.artifacts.find(a => a.id === 'a-docidx')!.name, '自定义名称');
   await again.mutate(again.state.revision, s => ({ ...s, artifacts: s.artifacts.map(a => a.id === 'a-docidx' ? { ...a, name: '信用卡营销交付文档检索索引' } : a) }));
   const last = new Store(path); await last.init();
   assert.equal(last.state.artifacts.find(a => a.id === 'a-docidx')!.name, '设计文档检索索引');
+});
+
+test('restarting drops the archived code graph and its task from stored demo data; tasks no longer link to it', async () => {
+  const path = join(await mkdtemp(join(tmpdir(), 'talents-store-')), 'state.json');
+  const first = new Store(path); await first.init();
+  await first.mutate(first.state.revision, s => ({ ...s,
+    artifacts: [...s.artifacts, { id: 'a-cg-java', projectId: 'carddemo', cap: 'codegraph', name: 'carddemo-java-1025 代码图谱', desc: '', sources: [], kind: 'index', published: null, draft: null }],
+    tasks: [...s.tasks, { id: 't-cg-java', cap: 'codegraph', artifact: 'a-cg-java' }, { id: 't-cg-mine', cap: 'codegraph', artifact: 'a-cg-java', produced: 'a-cg-java', status: 'success' }] }));
+  const again = new Store(path); await again.init();
+  assert.equal(again.state.artifacts.some(a => a.id === 'a-cg-java'), false);
+  assert.deepEqual(again.state.tasks.filter(t => String(t.id).startsWith('t-cg-')), [{ id: 't-cg-mine', cap: 'codegraph', status: 'success' }]);
+  assert.equal(again.state.tasks.length, seedState().tasks.length + 1);
 });

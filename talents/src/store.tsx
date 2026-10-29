@@ -1,11 +1,11 @@
-// The page state, its saving, keeping the Teams part current, hash routing and the simulated task clock.
+// The page state, its saving, keeping the Teams part current, CodeGraph builds on the service, hash routing and the simulated task clock.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { App } from 'antd';
-import { ApiError, resetState, saveState, submitPullRequest, teamsUpdate, type Boot, type SubmitRequest } from './api.ts';
+import { ApiError, codegraphRuns, resetState, saveState, startCodegraphRun, submitPullRequest, teamsUpdate, type Boot, type CodegraphUpdate, type SubmitRequest } from './api.ts';
 import { home, parseHash, type Route } from './navigation.ts';
-import { project, taskName } from './demo/model.ts';
+import { project, task, taskName } from './demo/model.ts';
 import { finishRun, runProgress } from './demo/runs.ts';
-import type { Role, Source, TalentsState, TeamsInfo, TeamsPart } from './types.ts';
+import type { Role, Source, TalentsState, Task, TeamsInfo, TeamsPart } from './types.ts';
 
 export interface Talents {
   state: TalentsState; teams: TeamsInfo; route: Route; role: Role;
@@ -18,6 +18,10 @@ export interface Talents {
   reset(): Promise<void>;
   /** Submits a PR; onStep gets each step as it starts (src/components/submit-pr.tsx). */
   submit(request: SubmitRequest, onStep: (step: number) => void): Promise<void>;
+  /** Starts a CodeGraph build of the task's repository on the service; fails when it cannot start. */
+  startCodegraph(taskId: string): Promise<void>;
+  /** Reads the code graph artifacts again (a graph opened may have been generated from a changed index). */
+  syncCodegraph(): void;
   go(hash: string): void;
   /** Rewrites the current hash without adding a history entry (e.g. to drop ?new=1 once handled). */
   replace(hash: string): void;
@@ -39,6 +43,20 @@ function withTeams(state: TalentsState, part: TeamsPart): TalentsState {
   });
   return { ...state, team: part.team, projects: part.projects, sessions: part.sessions,
     sources: [...sources, ...state.sources.filter(s => !s.fromTeams && s.type !== 'sessions')] };
+}
+
+/** The state with what the service reports of CodeGraph runs: patched tasks, and the code graph artifacts (a first build adds one). */
+function withCodegraphRuns(state: TalentsState, update: CodegraphUpdate): TalentsState {
+  const tasks = state.tasks.map(t => {
+    const patch = update.runs[t.id];
+    if (!patch) return t;
+    const next: Record<string, unknown> = { ...t, ...patch };
+    for (const [key, value] of Object.entries(patch)) if (value === null) delete next[key];
+    return next as unknown as Task;
+  });
+  const shown = new Map(update.artifacts.map(a => [a.id, a]));
+  const added = update.artifacts.filter(a => !state.artifacts.some(x => x.id === a.id));
+  return { ...state, tasks, artifacts: [...added, ...state.artifacts.map(a => shown.get(a.id) ?? a)] };
 }
 
 function routeOf(state: TalentsState, hash: string): Route {
@@ -92,6 +110,34 @@ export function TalentsProvider({ boot, children }: { boot: Boot; children: Reac
     saver.current.revision = fresh.revision;
     stateRef.current = fresh.state; setState(fresh.state);
   }, []);
+
+  // CodeGraph builds run on the service: shown without saving (the service shows them over the saved state), checked every
+  // second while one runs.
+  const showCodegraph = useCallback((update: CodegraphUpdate) => {
+    const before = stateRef.current, next = withCodegraphRuns(before, update);
+    for (const t of before.tasks) {
+      const after = next.tasks.find(x => x.id === t.id);
+      if (t.run?.live && after && after.status !== 'running') toast((after.status === 'success' ? '任务完成：' : '任务失败：') + taskName(next, after));
+    }
+    stateRef.current = next; setState(next);
+  }, [toast]);
+  const startCodegraph = useCallback(async (taskId: string) => {
+    const t = task(stateRef.current, taskId);
+    if (!t?.projectId) throw new Error('任务不存在');
+    showCodegraph(await startCodegraphRun({ taskId, projectId: t.projectId, sourceId: t.sources[0] }));
+  }, [showCodegraph]);
+  const syncCodegraph = useCallback(() => { codegraphRuns().then(showCodegraph, () => undefined); }, [showCodegraph]);
+  const building = state.tasks.some(t => t.run?.live);
+  useEffect(() => {
+    if (!building) return;
+    let stopped = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const check = async () => {
+      try { const update = await codegraphRuns(); if (!stopped) showCodegraph(update); } catch { /* the service is restarting: try again */ }
+      if (!stopped) timer = setTimeout(() => void check(), 1000);
+    };
+    timer = setTimeout(() => void check(), 1000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [building, showCodegraph]);
 
   // Teams data: the page waits on the service for Teams' revision to change (long polling) and checks again as soon as it
   // is shown or focused. While Teams cannot be read, the page keeps the Teams data it last read and checks every 5 s.
@@ -167,7 +213,7 @@ export function TalentsProvider({ boot, children }: { boot: Boot; children: Reac
     return url.toString();
   }, [focusProject, role, teams.origin]);
 
-  const value = useMemo<Talents>(() => ({ state, teams, route, role, focusProject, clock, update, reset, submit, go, replace, toast, teamsLink }),
-    [state, teams, route, role, focusProject, clock, update, reset, submit, go, replace, toast, teamsLink]);
+  const value = useMemo<Talents>(() => ({ state, teams, route, role, focusProject, clock, update, reset, submit, startCodegraph, syncCodegraph, go, replace, toast, teamsLink }),
+    [state, teams, route, role, focusProject, clock, update, reset, submit, startCodegraph, syncCodegraph, go, replace, toast, teamsLink]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

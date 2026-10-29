@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "codegraph:export": "node tools/export-codegraph.mjs",
     "test:codegraph:e2e": "node --import tsx tests/codegraph-browser.ts",
     "build": "node tools/build.mjs",
     "start": "node --import tsx server/index.ts",
@@ -30,6 +29,7 @@
     "force-graph": "^1.52.0",
     "marked": "15.0.12",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "yaml": "2.9.1"
   }
 }

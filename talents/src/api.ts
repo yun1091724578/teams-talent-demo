@@ -1,7 +1,7 @@
 // The Talents service (server/index.ts). Bootstrap returns Talents' own state merged with the team,
 // members, projects, code repositories, design documents and sessions read from Teams; saving sends the
 // whole state back and the service keeps only the Talents-owned part.
-import type { ProjectSkill, TalentsState, TeamsInfo, TeamsPart } from './types.ts';
+import type { Artifact, ProjectSkill, TalentsState, TeamsInfo, TeamsPart } from './types.ts';
 
 export class ApiError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 
@@ -49,3 +49,21 @@ export interface PullRequestTarget { repository: string; base: string }
 export const pullRequestTarget = (projectId: string) => api<PullRequestTarget>('GET', '/api/pull-requests/target?project=' + encodeURIComponent(projectId));
 /** SKILL.md of a project skill, read from the repository through the Talents service. */
 export const getSkill = (projectId: string, id: string) => api<ProjectSkill & { content: string }>('GET', '/api/skill?project=' + encodeURIComponent(projectId) + '&id=' + encodeURIComponent(id));
+
+/** CodeGraph builds run on the service (server/codegraph-runs.ts): what each run sets on its task (a null field is removed),
+ *  and the code graph artifacts as the builds show them. */
+export interface CodegraphUpdate { runs: Record<string, Record<string, unknown>>; artifacts: Artifact[] }
+export const codegraphRuns = () => api<CodegraphUpdate>('GET', '/api/codegraph-runs');
+export const startCodegraphRun = (request: { taskId: string; projectId: string; sourceId: string }) => api<CodegraphUpdate>('POST', '/api/codegraph-runs', request);
+/** Whether iCode's Code Agent has the codegraph MCP server (server/icode-agent.ts), and adding it. */
+export interface CodegraphMcp { configured: boolean; path: string; changed?: boolean; created?: boolean }
+export const codegraphMcp = () => api<CodegraphMcp>('GET', '/api/codegraph-mcp');
+export const applyCodegraphMcp = () => api<CodegraphMcp>('POST', '/api/codegraph-mcp', {});
+/** CodeGraph on this machine (server/codegraph-install.ts): its self-check, the last install and the install command. */
+export interface CodegraphEngine {
+  status: { state: 'installed' | 'missing' | 'failed'; version?: string; detail?: string; checkedAt: number };
+  install: { status: 'running' | 'success' | 'failed'; startedAt: number; endedAt?: number; command: string; logs: string[] } | null;
+  command: string | null;
+}
+export const codegraphEngine = (check = false) => api<CodegraphEngine>('GET', '/api/engines/codegraph' + (check ? '?check=1' : ''));
+export const installCodegraph = () => api<CodegraphEngine>('POST', '/api/engines/codegraph/install', {});

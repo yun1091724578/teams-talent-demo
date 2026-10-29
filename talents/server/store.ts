@@ -17,8 +17,16 @@ export async function atomicJson(path: string, value: unknown) { await atomicTex
 /** Seed artifacts renamed after demo data was stored: index artifacts are named for what they are, and the project
  *  document set is 设计文档 as in Teams. An artifact still carrying an old seed name takes the current name and description. */
 const RENAMED: Record<string, { from: string[]; name: string; desc: string }> = {
-  'a-cg-java': { from: ['carddemo-java-1025 CodeGraph'], name: 'carddemo-java-1025 代码图谱', desc: '查询 carddemo-java-1025 中类、方法的定义与调用关系。' },
   'a-docidx': { from: ['信用卡营销交付文档 RAG 检索', '信用卡营销交付文档检索索引'], name: '设计文档检索索引', desc: '按问题检索设计文档中的相关段落。' },
+};
+/** Seed data removed after demo data was stored: the code graph shown from an archived scan of carddemo-java-1025, and the
+ *  task that stood for its build (a code graph now comes from a build in the bound repository). */
+const REMOVED = { artifacts: new Set(['a-cg-java']), tasks: new Set(['t-cg-java']) };
+/** A task no longer links to a removed artifact (a CodeGraph run links its task to the artifact it built when shown). */
+const unlinked = (t: TalentsState['tasks'][number]) => {
+  const next = { ...t };
+  for (const key of ['artifact', 'produced'] as const) if (REMOVED.artifacts.has(next[key] as string)) delete next[key];
+  return next;
 };
 const renamed = (a: TalentsState['artifacts'][number]) => {
   const r = RENAMED[a.id];
@@ -38,7 +46,8 @@ export class Store {
       // Categories and built-in capabilities describe what Talents offers, not demo progress: always take the
       // current ones. Capabilities imported during the demo are kept.
       const { categories, capabilities } = seedState();
-      this.state = { ...stored, categories, capabilities: [...capabilities, ...(stored.capabilities ?? []).filter(c => c.custom)], artifacts: stored.artifacts.map(renamed) }; return;
+      this.state = { ...stored, categories, capabilities: [...capabilities, ...(stored.capabilities ?? []).filter(c => c.custom)], artifacts: stored.artifacts.filter(a => !REMOVED.artifacts.has(a.id)).map(renamed),
+        tasks: stored.tasks.filter(t => !REMOVED.tasks.has(t.id as string)).map(unlinked) }; return;
     }
     if (stored) {
       // Demo data from an older seed: keep a copy, then start from the current seed.
