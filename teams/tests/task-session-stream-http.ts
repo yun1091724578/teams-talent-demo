@@ -55,6 +55,9 @@ try {
   await request({ ...query, role: 'owner', cursor: next.cursor! }, 400);
   await writeFile(join(runRoot, 'result.json'), JSON.stringify({ ...scope, runId, sessionId, status: 'failed', finishedAt: new Date().toISOString() }));
   assert.equal((await request(query)).sessions[0].status, 'failed');
+  await appendFile(trajectory, '{bad}\n');
+  const degraded = await request(query);
+  assert.equal(degraded.sessions[0].trajectory?.state, 'degraded'); assert.equal(degraded.sessions[0].trajectory?.reason, 'corrupt_tail'); assert.ok(degraded.turns.length > 0); assert.match(degraded.sessions[0].note!, /任务进度不受影响/);
   assert.equal((await readFile(join(runtime, 'state.json'))).equals(originalState), true, 'GET requests must not alter state bytes');
   const output = 'test-results/task-session-stream'; await mkdir(output, { recursive: true });
   browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -68,6 +71,7 @@ try {
   assert.equal(await sessionButton.getAttribute('aria-pressed'), 'true');
   await page.locator('[data-session-message="user-1"]').waitFor(); assert.equal(await page.locator('[data-session-message="user-1"]').innerText(), '请展示实际用户输入');
   await page.locator('[data-session-message="reply-1"]').waitFor(); assert.equal(await page.locator('[data-session-message="reply-1"] > p').innerText(), '真实回复的可见部分');
+  await page.getByText('详细轨迹不可用，任务可继续', { exact: true }).waitFor();
   assert.equal(await page.locator('.task-session-activity').getAttribute('data-stream-task'), scope.taskId); assert.equal(await page.locator('.task-session-activity').getAttribute('data-stream-node'), 'develop');
   assert.equal(await page.getByRole('combobox', { name: '选择任务会话', exact: true }).count(), 0);
   await page.screenshot({ path: join(output, 'team-work-conversation.png'), fullPage: true, animations: 'disabled' });
@@ -82,7 +86,7 @@ try {
   const resumed = page.waitForRequest(request => request.url().includes('/api/task-session-stream?'));
   await page.locator('.ant-segmented').getByText('任务会话', { exact: true }).click(); await resumed; await page.locator('[data-session-message="reply-1"]').waitFor();
   assert.deepEqual(posts, []); assert.deepEqual(errors, []); assert.equal((await readFile(join(runtime, 'state.json'))).equals(beforeConversationReload), true, 'conversation reload must not alter state bytes');
-  await writeFile(join(output, 'http-result.json'), JSON.stringify({ passed: true, at: new Date().toISOString(), realServer: true, nativeExecution: false, nativeFiles: 'isolated protocol fixture', businessPosts: 0, stateFileUnchanged: true, checks: ['actual GET route', 'incremental append', 'cursor dedup', 'role/task/node isolation', 'native failure remains explicit', 'no-store', 'team-work conversation rendered from native files', 'conversation route survives reload', 'mobile conversation layout', 'hidden views pause conversation polling'] }, null, 2));
+  await writeFile(join(output, 'http-result.json'), JSON.stringify({ passed: true, at: new Date().toISOString(), realServer: true, nativeExecution: false, nativeFiles: 'isolated protocol fixture', businessPosts: 0, stateFileUnchanged: true, checks: ['actual GET route', 'incremental append', 'cursor dedup', 'role/task/node isolation', 'native failure remains explicit', 'no-store', 'trajectory corruption degrades without hiding the conversation', 'team-work conversation rendered from native files', 'conversation route survives reload', 'mobile conversation layout', 'hidden views pause conversation polling'] }, null, 2));
   console.log('PASS read-only session stream HTTP and team-work real conversation UI; no business writes');
 } finally {
   await browser?.close();

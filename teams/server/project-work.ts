@@ -25,6 +25,7 @@ import { readNativeTuiEnvelope } from './task-session-documents.js';
 import { nativeProcessActive, inspectNativeProcess } from '../scripts/native/session-liveness.mjs';
 import { focusWorkTerminal } from './terminal-focus.js';
 import { nativeWorkExecution } from './native-work-status.js';
+import { readTrajectoryHealth } from './trajectory-health.js';
 
 const execute = promisify(execFile);
 const nodeNames: Record<string, string> = { prepare: '需求澄清', develop: '开发', verify: '验证', accept: '验收' };
@@ -194,12 +195,18 @@ export class ProjectWorkService {
     if(owner.runId!==source.runId||owner.sessionId!==ready.sessionId||owner.projectId!==scope.projectId||owner.taskId!==scope.taskId||owner.sessionRoot!==join(runRoot,'session-root'))throw new Error('已准备会话的运行范围不匹配');
     const optional = async (name: string) => { try { return JSON.parse(await readFile(join(runRoot,name),'utf8')); } catch(error) { if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error; } };
     const result=await optional('result.json'), processRecord=await optional('process.json');
-    let active:NonNullable<ProjectWorkPlan['history']>['active']=null;
+    let active:NonNullable<ProjectWorkPlan['history']>['active']=null,staleIdentity=false;
     if(['interactive','task-file'].includes(owner.executionMode)) {
       if(result&&(result.executionMode!==owner.executionMode||result.runId!==source.runId||result.sessionId!==ready.sessionId||!['completed','failed'].includes(result.status)))throw new Error('会话退出回执身份不匹配');
-      const running=await nativeProcessActive(owner,processRecord);
+      let running=false;
+      try{running=await nativeProcessActive(owner,processRecord);}catch{staleIdentity=true;}
       const lock=await optional('session-root/sessions/.locks/'+ready.sessionId.replaceAll('-','').slice(0,12)+'.active.json');
       if(lock&&(lock.session_id!==ready.sessionId||lock.pid!==owner.pid||lock.started_at!==owner.startedAt))throw new Error('已准备会话的活动身份不能核验');
+      // A stale process.json must not turn the plan into a 500. The lock is the
+      // writer-owner evidence: if its PID is dead or reused, the saved session is resumable.
+      if(!running&&lock){
+        try{const info=await inspectNativeProcess(lock.pid);running=!!info&&!info.state.startsWith('Z')&&Date.parse(info.startedAt)<=Date.parse(lock.started_at)+1000;}catch{running=false;}
+      }
       if(running) {
         if(result||!lock)throw new Error('会话进程与退出/活动记录不一致，请核对原终端；未重复启动');
         const terminal=await optional('terminal-receipt.json');
@@ -208,8 +215,29 @@ export class ProjectWorkService {
         active={pid:owner.pid,application:canFocus?terminal.terminal:null,tty:terminal?.terminalKind==='terminal'?terminal.terminalId:'',...(canFocus?{terminal:{id:terminal.terminalId,kind:terminal.terminalKind,title:terminal.terminal,directory:ready.directory}}:{}),diagnostic:canFocus?'会话仍在运行，将切换到此任务的原终端；不会重复启动。':owner.executionMode==='task-file'?'此任务的 CLI 会话仍在运行，请查看作业状态；未重复启动。':'此任务会话仍在运行，但没有可核验的终端定位；请在原终端继续，未重复启动。'};
       }
     } else if(!result||result.runId!==source.runId||result.sessionId!==ready.sessionId||result.status!=='completed')throw new Error('初始化会话尚无有效完成回执，未尝试恢复');
+    // A fresh-session fallback is not visible through preparedSession. Before
+    // offering another launch, notice any other live interactive run for this task.
+    if(!active){
+      for(const name of await readdir(base)){
+        if(name===source.runId+'.native'||!/\.native$/i.test(name))continue;
+        const otherRoot=join(base,name);let manifest:any,owner:any,processRecord:any,terminal:any;
+        try{manifest=JSON.parse(await readFile(join(otherRoot,'manifest.json'),'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
+        if(manifest.executionMode!=='interactive'||manifest.scope?.projectId!==scope.projectId||manifest.scope?.taskId!==scope.taskId)continue;
+        try{owner=JSON.parse(await readFile(join(otherRoot,'native-session.json'),'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
+        if(owner.projectId!==scope.projectId||owner.taskId!==scope.taskId||owner.sessionRoot!==join(otherRoot,'session-root'))continue;
+        try{processRecord=JSON.parse(await readFile(join(otherRoot,'process.json'),'utf8'));}catch{processRecord=null;}
+        let running=false;try{running=await nativeProcessActive(owner,processRecord);}catch{pendingEntry=true;break;}
+        if(!running)continue;
+        try{terminal=JSON.parse(await readFile(join(otherRoot,'terminal-receipt.json'),'utf8'));}catch{terminal=null;}
+        const canFocus=owner.executionMode==='interactive'&&process.platform==='darwin'&&terminal?.terminalId&&['ghostty','terminal'].includes(terminal.terminalKind);
+        active={pid:owner.pid,application:canFocus?terminal.terminal:null,tty:terminal?.terminalKind==='terminal'?terminal.terminalId:'',...(canFocus?{terminal:{id:terminal.terminalId,kind:terminal.terminalKind,title:terminal.terminal,directory:manifest.directory}}:{}),diagnostic:'当前任务已有其他原生会话在运行；请先在该终端继续，未重复启动。'};
+        break;
+      }
+    }
     const envelope=await readNativeTuiEnvelope(runRoot,ready.sessionId);
-    return {sessionId:ready.sessionId,directory:ready.directory,title:'已准备的需求澄清会话',available:(!active||!!active.terminal)&&!pendingEntry,active,diagnostic:active?.diagnostic??(pendingEntry?'此前进入请求尚未取得原生会话回执，请核对已打开的终端；未重复启动。':result?.status==='failed'?'上次终端异常退出；最新对话已保存，将恢复同一会话。':'将恢复本任务最近保存的原生会话，继续保留对话。'),configuration:{agent:ready.agent,agentLabel:ready.agentLabel,model:ready.model,modelLabel:ready.modelLabel},prepared:{preparationRunId:ready.runId,sourceRunId:source.runId,sessionSha256:createHash('sha256').update(envelope.content).digest('hex')}};
+    const trajectory=await readTrajectoryHealth(join(runRoot,'session-root','sessions',ready.sessionId.replaceAll('-','').slice(0,12)),ready.sessionId);
+    const degraded=trajectory.state==='degraded'?' 原生详细轨迹已降级；任务可继续，可重试原会话或改用新会话。':'';
+    return {sessionId:ready.sessionId,directory:ready.directory,title:'已准备的需求澄清会话',trajectory,available:(!active||!!active.terminal)&&!pendingEntry,active,diagnostic:(active?.diagnostic??(staleIdentity?'上次会话进程身份已变化；已保留会话文件，将恢复同一会话。':pendingEntry?'此前进入请求尚未取得原生会话回执，请核对已打开的终端；未重复启动。':result?.status==='failed'?'上次终端异常退出；最新对话已保存，将恢复同一会话。':'将恢复本任务最近保存的原生会话，继续保留对话。'))+degraded,configuration:{agent:ready.agent,agentLabel:ready.agentLabel,model:ready.model,modelLabel:ready.modelLabel},prepared:{preparationRunId:ready.runId,sourceRunId:source.runId,sessionSha256:createHash('sha256').update(envelope.content).digest('hex')}};
   }
 
   async plan(role: Role, input: ProjectWorkSelection, directoryActorId: string = role, mode:ProjectWorkMode='tui'): Promise<ProjectWorkPlan> {
@@ -267,9 +295,17 @@ export class ProjectWorkService {
     const workspaceReason=requirement&&!preparedDirectory&&!requirement.workDirectory&&await configuredProjectWorkspace(this.directory,work.target.projectId)&&!await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo)?'请先准备需求会话，由准备流程创建独立任务工作区':undefined;
     const reason = taskStartReason ?? workspaceReason ?? cliReason ?? preparationReason ?? (history?.active ? undefined : launchReason ?? knowledgeReason);
     const actions: ProjectWorkPlan['actions'] = [{ id: history?.active ? 'focus' : history ? 'resume' : 'new', label: history?.active ? '进入正在运行的会话' : history ? '进入已准备会话' : requirement ? '打开当前节点的 iCode 交互会话' : '新建当前工作的 iCode 会话', enabled: !reason, ...(reason ? { reason } : {}) }];
+    // A fresh session is a deliberate fallback: never while another task session is live.
+    if(history && !history.active && history.available)actions.push({id:'new',label:'新开会话（不保留当前对话）',enabled:!reason,...(reason?{reason}:{})});
     const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary: (await selectICode()).path??binary, ...defaults, trace: requirement ? defaults?.trace : undefined }, directory, context, actions, defaultAction: 'new' };
-    if(history){plan.history=history;plan.defaultAction=history.active?'focus':'resume';}
-    plan.planToken = hash({ role, plan, revision: state.revision });
+    if(history){
+      plan.history=history;
+      const unfixable=history.trajectory?.state==='degraded'&&['corrupt_tail','schema_too_new','permission','unreadable','too_large'].includes(history.trajectory.reason??'');
+      plan.defaultAction=history.active?'focus':unfixable&&actions.some(action=>action.id==='new'&&action.enabled)?'new':'resume';
+    }
+    // The token pins the decision, not volatile trajectory counters/check time.
+    const tokenPlan = { ...plan, history: plan.history ? { ...plan.history, trajectory: plan.history.trajectory ? { state: plan.history.trajectory.state, reason: plan.history.trajectory.reason ?? null } : undefined } : undefined };
+    plan.planToken = hash({ role, plan: tokenPlan, revision: state.revision });
     plan.previous = await this.previous(work.target); return plan;
   }
   bind(role: Role, input: ProjectWorkSelection, directory: string) {
@@ -333,7 +369,7 @@ export class ProjectWorkService {
     await atomicJson(path, { identity, receipt });
     try {
       if (body.action === 'focus') { const focused = await this.transport.focus(plan.history!); receipt.status = 'terminal-focused'; receipt.note = focused.note; }
-      else { const start=mode==='cli'?this.transport.startCli:this.transport.start;if(!start)throw new Error('当前实例未配置 CLI 启动适配器');const started = await start({ directory, terminal: plan.instance.terminal?.id??'', agent: body.action === 'resume' ? plan.history!.configuration!.agent : plan.instance.agent!, model: body.action === 'resume' ? plan.history!.configuration!.model : plan.instance.model!, ...(receipt.sessionId ? { sessionId: receipt.sessionId } : {}), ...(requirement ? { task: { runId: body.requestId, path: contextPath, scope: { projectId: plan.target.projectId, taskId: requirement.id, nodeId: plan.target.nodeId! },...(plan.history?.prepared?{preparedSession:{...plan.history.prepared,sessionId:plan.history.sessionId}}:{}) } } : {}), instruction }); receipt.status = mode==='cli'?'cli-requested':'terminal-requested'; if (started && typeof started === 'object' && 'terminal' in started && typeof started.terminal === 'string') receipt.terminal = started.terminal; receipt.note = mode==='cli'?'已提交本次 CLI 工作请求；真实会话、退出结果与日志请查询作业状态，任务进度以同会话 CLI 回传为准。':'已请求 ' + (receipt.terminal ?? '系统终端') + (requirement ? ' 打开交互式 iCode；开发者提交工作指令时附带当前节点上下文入口。终端受理不等于 TUI 已建立、材料已读取或任务已完成。' : ' 打开对应工作目录的 iCode；终端受理不等于模型执行、上下文读取或任务完成。'); }
+      else { const start=mode==='cli'?this.transport.startCli:this.transport.start;if(!start)throw new Error('当前实例未配置 CLI 启动适配器');const started = await start({ directory, terminal: plan.instance.terminal?.id??'', agent: body.action === 'resume' ? plan.history!.configuration!.agent : plan.instance.agent!, model: body.action === 'resume' ? plan.history!.configuration!.model : plan.instance.model!, ...(receipt.sessionId ? { sessionId: receipt.sessionId } : {}), ...(requirement ? { task: { runId: body.requestId, path: contextPath, scope: { projectId: plan.target.projectId, taskId: requirement.id, nodeId: plan.target.nodeId! },...(plan.history?.prepared&&body.action!=='new'?{preparedSession:{...plan.history.prepared,sessionId:plan.history.sessionId}}:{}) } } : {}), instruction }); receipt.status = mode==='cli'?'cli-requested':'terminal-requested'; if (started && typeof started === 'object' && 'terminal' in started && typeof started.terminal === 'string') receipt.terminal = started.terminal; receipt.note = mode==='cli'?'已提交本次 CLI 工作请求；真实会话、退出结果与日志请查询作业状态，任务进度以同会话 CLI 回传为准。':'已请求 ' + (receipt.terminal ?? '系统终端') + (requirement ? ' 打开交互式 iCode；开发者提交工作指令时附带当前节点上下文入口。终端受理不等于 TUI 已建立、材料已读取或任务已完成。' : ' 打开对应工作目录的 iCode；终端受理不等于模型执行、上下文读取或任务完成。'); }
       await atomicJson(path, { identity, receipt }); return receipt;
     } catch (error) {
       receipt.status = 'uncertain'; receipt.note = '原生请求结果待核对：' + (error as Error).message + '。原请求已保留，不会自动重发或另开会话。'; await atomicJson(path, { identity, receipt }); throw new DomainError(receipt.note);

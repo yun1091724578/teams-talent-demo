@@ -59,4 +59,6 @@ Owner 验收时，无需关闭仍在使用的 TUI：Teams 核验该任务的原�
 
 Trace 预检使用当前 iCode 自身的 Python，不能用系统里另一个 Python 代替。某些 iCode 0.31 安装只有 OpenTelemetry SDK，缺少 HTTP exporter。先用 `DEMO_ICODE_PYTHON` 指向原生运行时，再检查 `"<iCode Python>" scripts/native/check-trace-runtime.py`；若缺包，为同一环境安装与输出 `sdkVersion` 相同版本的 `opentelemetry-exporter-otlp-proto-http`，例如 `uv pip install --python "<iCode Python>" "opentelemetry-exporter-otlp-proto-http==1.45.1" "opentelemetry-sdk==1.45.1"`。Windows PowerShell 在带引号的可执行路径前加 `&`。保持已有包版本，安装前保存包清单；启动会明确显示缺失或版本不匹配，不会静默关闭 trace。
 
+iCode TUI 若提示“轨迹记录无法启动，已为此会话禁用”，任务不会阻塞；Teams 会显示“详细轨迹不可用，任务可继续”，并在启动入口默认恢复原会话、允许明确选择“新开会话（不保留当前对话）”。本地轨迹与 OTLP trace 是两条链路，详见 [原生轨迹健康与恢复](native-trajectory-health.md)。
+
 Trace 在 Teams「开发会话轨迹」页面查看，由 Python trace-server 接收并提供 `/api/v1` 查询接口。任务交付页只展示用户输入与模型可见回复，工具调用细节保留在独立轨迹页。

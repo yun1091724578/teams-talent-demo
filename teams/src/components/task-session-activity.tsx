@@ -50,11 +50,14 @@ export function TaskSessionActivity({ projectId, taskId, nodeId, sessionId, show
   }, [projectId, taskId, nodeId, role, selection, retry, readonlySource]);
   if (readonlySource) return <section className="task-session-activity" aria-label="会话过程"><div className="task-session-activity-heading"><h3>会话过程</h3><Tag>原项目记录</Tag></div><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="来源记录未提供完整用户输入与模型回复" /></section>;
   const selected = stream?.sessions.find(item => item.id === stream.selectedSessionId);
+  const health = selected?.trajectory;
   const bottom = () => { following.current = true; setHasNew(false); if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight; };
   return <section className="task-session-activity" aria-label="会话过程" data-stream-task={taskId} data-stream-node={nodeId}>
-    <div className="task-session-activity-heading"><h3>会话过程</h3><Space size={6} wrap><Tag>{error ? '连接中断' : pending ? '连接中' : '已连接'}</Tag>{selected && <Tag>{statusLabels[selected.status]}</Tag>}</Space></div>
+    <div className="task-session-activity-heading"><h3>会话过程</h3><Space size={6} wrap><Tag>{error ? '连接中断' : pending ? '连接中' : '已连接'}</Tag>{selected && <Tag>{statusLabels[selected.status]}</Tag>}{health?.state === 'degraded' && <Tag color="orange">轨迹降级</Tag>}</Space></div>
     {showSessionSelector && stream?.sessions.length ? <Select className="task-session-selector" aria-label="选择任务会话" value={stream.selectedSessionId ?? undefined} options={stream.sessions.map(item => ({ value: item.id, label: item.title + ' · ' + statusLabels[item.status] }))} onChange={id => { setStream(undefined); setTurns([]); setPending(true); setHasNew(false); setChosen({ scope: scopeKey, id }); }} /> : null}
     {error && <Alert type="warning" showIcon title="会话过程读取未完成" description={error} action={<Button size="small" onClick={() => setRetry(value => value + 1)}>重试</Button>} />}
+    {health?.state === 'degraded' && <Alert type="warning" showIcon title="详细轨迹不可用，任务可继续" description={health.diagnostic ?? '原生轨迹记录已降级；会话过程仅展示对话正文，原始文件未修改。'} action={<Button size="small" onClick={() => setRetry(value => value + 1)}>重新读取</Button>} />}
+    {health?.state === 'recovering' && <Alert type="info" showIcon title="正在恢复原生轨迹" description={health.diagnostic ?? '恢复期间会话过程仍可继续读取。'} />}
     {stream?.note && <p className="muted task-session-note">{stream.note}</p>}
     {selected?.note && <p className="muted task-session-note">{selected.note}</p>}
     <div className="task-session-events" ref={viewport} onScroll={() => { const element = viewport.current; if (element) { following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48; if (following.current) setHasNew(false); } }}>
