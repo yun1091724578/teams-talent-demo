@@ -166,7 +166,7 @@ export function AgentManagement({ nativeControls }: { nativeControls: ReactNode 
               id: tool, name: names[tool], kind: '本机命令行工具', path: found.path ?? undefined, version: found.version ?? undefined,
               state: found.installed ? '本机已发现' : '本机未安装',
               identity: `${found.version ?? '版本未取得'} · 当前设备 / 当前系统用户 · 配置只读`,
-              facts: [{ label: '数据来源', value: '本机探测 /api/tools；配置只读' }, ...(discovered ? [{ label: '发现方式', value: discovered === 'official' ? '官方安装位置自动发现' : discovered === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : discovered === 'missing' ? '未发现可用安装' : '仓库内开发包' }] : []), { label: '程序路径', value: found.path ?? '未配置' }, { label: '版本', value: found.version ?? '未取得' }, { label: '维护能力', value: '尚未连接安装、升级和配置写入服务' }],
+              facts: [{ label: '数据来源', value: '本机探测 /api/tools；配置只读' }, ...(discovered ? [{ label: '发现方式', value: discovered === 'official' ? '官方安装位置自动发现' : discovered === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : discovered === 'uv' ? 'uv tool 安装回执' : discovered === 'pipx' ? 'pipx 虚拟环境' : discovered === 'path' ? 'PATH 中的 icode 可执行文件' : discovered === 'missing' ? '未发现可用安装' : '仓库内开发包' }] : []), { label: '程序路径', value: found.path ?? '未配置' }, { label: '版本', value: found.version ?? '未取得' }, { label: '维护能力', value: '尚未连接安装、升级和配置写入服务' }],
               categories: [
                 { category: 'agent', label: 'Agent', description: tool === 'icode' ? `项目采用 Code Agent ${latest.current.state.adoptedAgent}` : 'Agent / 角色 · OpenCode 配置' },
                 { category: 'model', label: 'Model', description: '服务商与模型由原生工具管理 · 查看接入说明' },

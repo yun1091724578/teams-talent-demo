@@ -2,13 +2,13 @@
 
 This directory contains a real CodeGraph scan of `workspace/carddemo-java-1025`, frozen for repeatable demonstrations. It does not track the current workspace. Starting the app, rendering the graph, and running tests do not require CodeGraph, Java, or a live `.codegraph/` directory.
 
-`current.json` selects a directory under `snapshots/<snapshotId>/`:
+Archives are kept per Teams project, under `<projectId>/`. Talents treats a project's archive as the scan of the code repository bound to that project in Teams. `<projectId>/current.json` selects a directory under `<projectId>/snapshots/<snapshotId>/`:
 
 - `graph.json`: nodes, edges, provenance, statistics, and captured source text for the visualization.
 - `codegraph.db.gz`: a compressed, standalone SQLite backup of the original CodeGraph database, including committed WAL content.
 - `manifest.json`: tool version, scan time, source digest, database schema, sizes, and archive checksums.
 
-Commit these files together. Existing snapshot directories are retained when a new snapshot is exported. To demonstrate an earlier snapshot, change the ID in `current.json` and restart Talents; no indexing is needed. The JSON is loaded by the Talents service, not bundled into the frontend JavaScript.
+Commit these files together. Existing snapshot directories are retained when a new snapshot is exported. To demonstrate an earlier snapshot, change the ID in `carddemo/current.json` and restart Talents; no indexing is needed. The JSON is loaded by the Talents service, not bundled into the frontend JavaScript.
 
 ## Optional: create another demo snapshot
 
@@ -17,7 +17,7 @@ From the repository root, using the installed CodeGraph CLI and Node.js 24:
 ```sh
 codegraph init /absolute/path/carddemo-java-1025 --yes  # first scan only
 # Or: codegraph index /absolute/path/carddemo-java-1025
-npm --prefix talents run codegraph:export -- --project /absolute/path/carddemo-java-1025
+npm --prefix talents run codegraph:export -- --project carddemo --dir /absolute/path/carddemo-java-1025
 npm --prefix talents run seed:shared
 ```
 
@@ -27,7 +27,7 @@ To inspect the original index without changing the workspace:
 
 ```sh
 mkdir -p /tmp/carddemo-archived/.codegraph
-gzip -dc talents/data/codegraph/snapshots/5774e64217fd5b2c/codegraph.db.gz > /tmp/carddemo-archived/.codegraph/codegraph.db
+gzip -dc talents/data/codegraph/carddemo/snapshots/5774e64217fd5b2c/codegraph.db.gz > /tmp/carddemo-archived/.codegraph/codegraph.db
 sqlite3 /tmp/carddemo-archived/.codegraph/codegraph.db 'select kind, count(*) from nodes group by kind;'
 ```
 

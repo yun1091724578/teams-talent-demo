@@ -10,6 +10,8 @@ export type RequirementNode = 'prepare' | 'develop' | 'verify' | 'accept';
 export type RequirementStage = 'preparing' | 'developing' | 'verifying' | 'awaiting-acceptance' | 'accepted' | 'returned';
 export interface RequirementNodeState { status:'pending'|'running'|'blocked'|'complete'|'waiting-owner'; updatedAt:string|null; summary:string }
 export interface RequirementCheck { id:string; nodeId:RequirementNode; status:'passed'|'failed'; source:'actual'|'preset'; artifact?:string; summary:string; at:string; sessionId:string|null }
+/** Owner-registered confirmation of a requirement fact, with the basis it rests on. */
+export interface RequirementConfirmation { id:string; item:string; basis:string; confirmedBy:string; confirmedAt:string }
 export interface DeliveryRequirement {
  id:string;projectId:string;title:string;description:string;assigneeId:string;skillIds:string[];workDirectory?:string;due?:string;creationRequest?:string;
  talentInputsSnapshot?:TalentTaskInputs;
@@ -17,7 +19,7 @@ export interface DeliveryRequirement {
  nodeContractVersion?:'delivery-node-v1'|'delivery-node-v2';
  skillBindings?:SkillBinding[];userSkillIds?:string[];
  stage:RequirementStage;createdAt:string;updatedAt:string;acceptedAt?:string;preparedAt?:string;inputDigest?:string;
- nodes:Record<RequirementNode,RequirementNodeState>;checks:RequirementCheck[];
+ nodes:Record<RequirementNode,RequirementNodeState>;checks:RequirementCheck[];confirmations?:RequirementConfirmation[];
  /** IDs from the current verification submission; empty means fresh checks are required. */
  verificationCheckIds?:string[];
  /** Preserved pre-unification facts; these are not iCode execution receipts. */
@@ -53,6 +55,24 @@ export function assignDeliveryRequirement(state:DemoState,role:Role,input:Record
  if(preparation&&['preparing-session','ready'].includes(preparation.status)&&input.assigneeId!==task.assigneeId)throw new DomainError('原生会话正在准备或已就绪，请先处理当前会话后再改派',409);
  if(typeof input.assigneeId!=='string')throw new DomainError('请明确交付人或待分配状态',400);
  task.assigneeId=optionalAssignee(state,projectId,input.assigneeId);task.updatedAt=at;return task;
+}
+/** Only the Owner records confirmations; the delivered member cannot confirm its own open questions. */
+export function updateRequirementConfirmations(state:DemoState,role:Role,projectId:string,taskId:string,value:unknown,at:string){
+ if(role!=='owner')throw new DomainError('仅项目 Owner 可以登记确认依据',403);
+ const task=deliveryRequirement(state,projectId,taskId);if(!task)throw new DomainError('交付需求不存在',404);
+ if(task.stage==='awaiting-acceptance'||task.stage==='accepted')throw new DomainError('需求已提交验收，确认依据不能修改',409);
+ if(!Array.isArray(value)||value.length>20)throw new DomainError('确认依据格式无效或超过 20 条',400);
+ const prior=new Map((task.confirmations??[]).map(item=>[item.id,item])),ids=new Set<string>();
+ const text=(entry:Record<string,unknown>,field:string,label:string,limit:number)=>{const raw=entry[field];if(typeof raw!=='string'||!raw.trim()||raw.length>limit||/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(raw))throw new DomainError(label+'无效',400);return raw.trim();};
+ task.confirmations=value.map(raw=>{
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new DomainError('确认依据条目无效',400);
+  const entry=raw as Record<string,unknown>,id=entry.id===undefined?crypto.randomUUID():text(entry,'id','确认依据标识',100);
+  if(ids.has(id))throw new DomainError('确认依据标识重复',400);ids.add(id);
+  const item=text(entry,'item','确认事项',300),basis=text(entry,'basis','确认依据',2000),confirmedBy=text(entry,'confirmedBy','确认人',80);
+  const previous=prior.get(id),unchanged=previous&&previous.item===item&&previous.basis===basis&&previous.confirmedBy===confirmedBy;
+  return {id,item,basis,confirmedBy,confirmedAt:unchanged?previous.confirmedAt:at};
+ });
+ task.updatedAt=at;return task;
 }
 export function verificationChecks(task:DeliveryRequirement):RequirementCheck[]{
  if(task.verificationCheckIds!==undefined)return task.checks.filter(check=>task.verificationCheckIds!.includes(check.id));
@@ -112,6 +132,7 @@ export function validateDeliveryRequirements(state:DemoState){
   if(!['carddemo','teams'].includes(task.projectId)&&!state.workspace.projects?.some(project=>project.id===task.projectId))throw new Error('交付需求所属项目不存在');
   if(task.due!==undefined)optionalDue(task.due);
   if(task.creationRequest!==undefined&&(typeof task.creationRequest!=='string'||task.creationRequest.length>12000))throw new Error('需求创建依据无效');
+  if(task.confirmations!==undefined&&(!Array.isArray(task.confirmations)||task.confirmations.length>20||new Set(task.confirmations.map(item=>item?.id)).size!==task.confirmations.length||task.confirmations.some(item=>!item||typeof item.id!=='string'||!item.id||typeof item.item!=='string'||!item.item.trim()||item.item.length>300||typeof item.basis!=='string'||!item.basis.trim()||item.basis.length>2000||typeof item.confirmedBy!=='string'||!item.confirmedBy.trim()||item.confirmedBy.length>80||typeof item.confirmedAt!=='string'||!Number.isFinite(Date.parse(item.confirmedAt)))))throw new Error('需求确认依据无效；未自动覆盖');
   if(task.verificationCheckIds!==undefined&&(!Array.isArray(task.verificationCheckIds)||new Set(task.verificationCheckIds).size!==task.verificationCheckIds.length||task.verificationCheckIds.some((id,index)=>typeof id!=='string'||task.checks[task.checks.length-task.verificationCheckIds!.length+index]?.id!==id)))throw new Error('需求当前检查批次无效；未自动覆盖');
   if(task.nodeInputSnapshots!==undefined){for(const [node,input]of Object.entries(task.nodeInputSnapshots)){if(!['prepare','develop','verify','accept'].includes(node)||!input||input.projectId!==task.projectId||input.taskId!==task.id||input.nodeId!==node||!Array.isArray(input.skills)||!Array.isArray(input.knowledge?.assets))throw new Error('节点采用输入范围无效');}}
   if(task.nodeContractVersion!==undefined&&!['delivery-node-v1','delivery-node-v2'].includes(task.nodeContractVersion))throw new Error('任务节点合同版本无效');

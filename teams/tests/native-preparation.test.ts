@@ -20,6 +20,18 @@ test('preparation requires successful native material reads and refuses mutating
  const contents=reads.flatMap((read,index)=>[{type:'function_call',name:'read_file',call_id:'call-'+index,arguments:JSON.stringify({path:read.path})},{type:'function_result',call_id:'call-'+index,result:'File: '+read.path+' (2 lines, 10 chars)\n1: material'}]);
  const envelope={state:{messages:[{role:'assistant',contents}]}};
  assert.equal(preparationReadingEvidence(envelope,reads).length,2);
+ const crlf={path:'/task/crlf.md',sha256:'c'.repeat(64)};
+ assert.equal(preparationReadingEvidence({state:{messages:[{role:'assistant',contents:[{type:'function_call',name:'read_file',call_id:'crlf',arguments:JSON.stringify({path:'/task/crlf.md'})},{type:'function_result',call_id:'crlf',result:'File: /task/crlf.md\n1|first\r\n2|second\n'}]}]}},[{...crlf,content:'first\r\nsecond\r\n'}]).length,1,'CRLF 材料与 CRLF 回执行数一致，不误判为截断');
+ const long='x'.repeat(3000),longRead={path:'/task/long.json',sha256:'d'.repeat(64)};
+ const truncated=`File: /task/long.json (2 lines, ${long.length+6} chars)\n1|{"a":\n2|${long.slice(0,2048)}... [truncated]\n[Long lines truncated to 2048 chars: line 2 (${long.length} chars). Use offset=2, limit=1 with a sufficient max_tokens budget to read a line in full.]`;
+ const recovered=`File: /task/long.json\n2|${long}\n[Showing lines 2-2 of 2. Use offset=3, limit=1 to continue reading if needed.]`;
+ const longEnvelope=(...results:string[])=>({state:{messages:[{role:'assistant',contents:[
+  {type:'function_call',name:'read_file',call_id:'full',arguments:JSON.stringify({path:'/task/long.json'})},
+  {type:'function_result',call_id:'full',result:results[0]},
+  ...(results[1]===undefined?[]:[{type:'function_call',name:'read_file',call_id:'long',arguments:JSON.stringify({path:'/task/long.json',offset:2,limit:1})},{type:'function_result',call_id:'long',result:results[1]}]),
+ ]}]}});
+ assert.equal(preparationReadingEvidence(longEnvelope(truncated,recovered),[{...longRead,content:'{"a":\n'+long+'\n'}]).length,1,'超长行按提示单行重读后，全文行集完整');
+ assert.throws(()=>preparationReadingEvidence(longEnvelope(truncated),[{...longRead,content:'{"a":\n'+long+'\n'}]),/截断或缺行/,'只截断未重读不得算已读');
  assert.throws(()=>preparationReadingEvidence({state:{messages:[{role:'assistant',contents:[{type:'text',text:'I read all files'}]}]}},reads),/缺少/);
  assert.throws(()=>preparationReadingEvidence({state:{messages:[{contents:[...contents,{type:'function_call',name:'run_shell',call_id:'bad',arguments:'{}'}]}]}},reads),/只读材料/);
  const failed=structuredClone(envelope);failed.state.messages[0].contents[1].result='Error: cannot read';assert.throws(()=>preparationReadingEvidence(failed,reads),/缺少/);

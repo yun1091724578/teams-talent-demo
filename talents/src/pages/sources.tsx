@@ -14,6 +14,9 @@ import { currentSkill } from '../demo/suggestions.ts';
 import { CardGrid, EmptyState, Fields, FileMark, ItemCard, Section, SourceIcon } from '../components/ui.tsx';
 import type { Toolbar } from './level.tsx';
 
+/** A Teams repository has a path only once its workspace is bound in the Teams project overview. */
+const unbound = (s: Source) => s.type === 'repo' && !s.bound;
+const SourcePath = ({ s }: { s: Source }) => unbound(s) ? <span className="ui-note">未在 iCode Teams 绑定本机目录</span> : <span className="path">{s.path}</span>;
 const fromText = (s: Source) => s.from ? { teams: '来自 iCode Teams', git: '来自 Git 仓库', shared: '来自共享目录' }[s.from.kind] : '';
 
 export function LevelSources({ pid, toolbar }: { pid: string | null; toolbar: Toolbar }) {
@@ -21,7 +24,7 @@ export function LevelSources({ pid, toolbar }: { pid: string | null; toolbar: To
   const [open, setOpen] = useState<string | null>(null), [registering, setRegistering] = useState(false);
   const [collection, setCollection] = useState<'sessions' | 'skills' | null>(null);
   const list = levelSources(st, pid), p = project(st, pid);
-  const card = (s: Source) => <ItemCard key={s.id} icon={<SourceIcon type={s.type} />} title={s.name} subtitle={<span className="path">{s.path}</span>} onClick={() => setOpen(s.id)}
+  const card = (s: Source) => <ItemCard key={s.id} icon={<SourceIcon type={s.type} />} title={s.name} subtitle={<SourcePath s={s} />} onClick={() => setOpen(s.id)}
     caption={s.fromTeams ? <Tag>iCode Teams</Tag> : <Tag>本地登记</Tag>}
     actions={<Button type="link" size="small" onClick={() => setOpen(s.id)}>详情</Button>}>
     {s.desc && <p>{s.desc}</p>}
@@ -205,9 +208,9 @@ function SourceDrawer({ id, onClose }: { id: string; onClose(): void }) {
   return <Drawer open width={560} onClose={onClose} title={<div><div className="caption">{(s.type === 'repo' ? '代码仓' : '文档集') + (local ? '，本地登记' : '，来自 iCode Teams')}</div>{s.name}</div>}
     extra={local && <Button onClick={() => setEditing(true)}>编辑</Button>}
     footer={<div className="drawer-foot">{local ? <Button danger onClick={remove}>移除来源</Button> : <Button href={teamsLink(s.projectId)} icon={<ExportOutlined />}>在 iCode Teams 中管理</Button>}
-      <span className="spacer" /><Button onClick={() => { onClose(); go(levelHash(s.projectId ?? null, 'tasks', { new: '1', source: id })); }}>新建知识任务</Button></div>}>
+      <span className="spacer" /><Button disabled={unbound(s)} title={unbound(s) ? '先在 iCode Teams 项目概览中绑定代码仓' : undefined} onClick={() => { onClose(); go(levelHash(s.projectId ?? null, 'tasks', { new: '1', source: id })); }}>新建知识任务</Button></div>}>
     {s.type === 'repo'
-      ? <div className="form-body">{s.desc && <p>{s.desc}</p>}<Fields rows={[['路径', <span className="path">{s.path}</span>], !!s.origin && ['远端', <span className="path">{s.origin}</span>], ['当前分支', s.branch],
+      ? <div className="form-body">{s.desc && <p>{s.desc}</p>}<Fields rows={[['路径', <SourcePath s={s} />], !!s.origin && ['远端', <span className="path">{s.origin}</span>], [s.bound ? '交付基线分支' : '分支', s.branch],
           !!s.commit && ['最近提交', <><code>{s.commit.sha}</code> {s.commit.message}<div className="caption">{s.commit.time}</div></>], projectField(st, s)]} /></div>
       : <DocsDetail st={st} s={s} checking={checking} onCheck={runCheck} />}
     {editing && <EditSource s={s} onClose={() => setEditing(false)} />}

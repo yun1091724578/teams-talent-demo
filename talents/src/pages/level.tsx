@@ -51,7 +51,7 @@ function Level({ pid }: { pid: string | null }) {
   </div>;
   const Body = { sources: LevelSources, tasks: LevelTasks, review: LevelReview }[tab];
   return <div className="page-stack level-page">
-    {p ? <PageHeader title={p.name} />
+    {p ? <PageHeader title={p.name} description={p.readonly ? '从其他 iCode Teams 导入的项目，在 Teams 中只读浏览' : undefined} />
       : <PageHeader title="团队" />}
     <Body key={tab} pid={pid} toolbar={toolbar} />
   </div>;
@@ -63,7 +63,7 @@ function ProjectList() {
   const card = (p: Project) => {
     const list = levelSources(st, p.id), w = waiting(st, p.id), open = () => go(levelHash(p.id));
     return <ItemCard key={p.id} icon={<SourceIcon type="project" />} title={p.name} onClick={open}
-      extra={<>{w.review > 0 && <Tag color="processing">{w.review} 个待审阅</Tag>}{w.suggestions > 0 && <Tag color="warning">{w.suggestions} 条建议待提交</Tag>}</>}
+      extra={<>{p.readonly && <Tag>导入项目</Tag>}{w.review > 0 && <Tag color="processing">{w.review} 个待审阅</Tag>}{w.suggestions > 0 && <Tag color="warning">{w.suggestions} 条建议待提交</Tag>}</>}
       actions={<Button type="link" size="small" onClick={open}>进入</Button>}>
       <Fields rows={[['代码仓', names(list.filter(s => s.type === 'repo'))], ['文档集', names(list.filter(s => s.type === 'docs'))]]} />
     </ItemCard>;

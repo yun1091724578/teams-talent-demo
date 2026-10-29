@@ -8,7 +8,7 @@ import { checkedNode } from './talent-node-inputs.js';
 import { projectMembers } from '../src/teams-domain.js';
 import { createTaskSessionStream } from './task-session-stream.js';
 import type { TaskSessionStreamQuery } from '../src/task-session-stream.js';
-import { assignDeliveryRequirement, createDeliveryRequirement, deliveryRequirement, acceptDeliveryRequirement, returnDeliveryRequirement, requireDeliveryMember } from '../src/delivery-requirements.js';
+import { assignDeliveryRequirement, createDeliveryRequirement, deliveryRequirement, acceptDeliveryRequirement, returnDeliveryRequirement, requireDeliveryMember, updateRequirementConfirmations } from '../src/delivery-requirements.js';
 import { queueTaskCollection, queueTaskPreparation, taskAutomation } from '../src/task-automation.js';
 import { TaskAutomationService } from './task-automation.js';
 import { TaskPreparationService } from './task-preparation.js';
@@ -30,11 +30,12 @@ import { locateChrysEngine } from './engine-locate.js';
 import { createSourcePluginCatalog } from '../src/source-plugins.js';
 import { updateWorkspace, type WorkspaceAction } from '../src/workspace.js';
 import { headers, bodyJson, staticFile, readFixtures } from './http-shared.js';
-import { exportTeamsSnapshot, knowledgeVersion, projectKnowledge, projectSkillVersions, readTalentsFile } from './shared-data.js';
+import { teamsSnapshot, knowledgeVersion, projectKnowledge, projectSkillVersions, readTalentsFile } from './shared-data.js';
 import { transition } from '../src/domain.js';
 import { isTraceApi, proxyTrace, startTraceService, stopTraceService } from './trace-service.js';
 import { ProjectWorkService } from './project-work.js';
 import { collaborationContext, collaborationOperation, collaborationWrite } from './collaboration-service.js';
+import { SharedChanges } from './shared-changes.js';
 const releaseTaskMaintenance=await acquireTaskMaintenance(runtimeDir,'service');
 const store = new Store(); await store.init();
 const token = randomBytes(24).toString('hex');
@@ -43,9 +44,9 @@ const deletions = new TaskDeletionService(store,{root,runtime:runtimeDir,shared:
 const work = new ProjectWorkService(() => store.state, fixtures);
 const taskSessionStream = createTaskSessionStream(runtimeDir);
 const sourceCatalog = createSourcePluginCatalog(fixtures);
-let exporting: Promise<unknown> = Promise.resolve();
-/** Exports run one after another so an older snapshot never overwrites a newer one. */
-const exportSnapshot = () => (exporting = exporting.catch(() => undefined).then(() => exportTeamsSnapshot(store.state, fixtures, sourceCatalog)));
+/** Talents reads the team, projects and sessions over HTTP and waits on this revision to learn when they change. */
+const sharedChanges = new SharedChanges();
+store.onCommit = () => sharedChanges.changed();
 /** Talents publishing knowledge for the card project counts as "project knowledge built" in the delivery flow. */
 async function syncKnowledge() {
   try {
@@ -53,9 +54,8 @@ async function syncKnowledge() {
     if (version && version !== store.state.knowledgeVersion) await store.transact(state => version === state.knowledgeVersion ? state : transition(state, 'knowledge', 'owner', { knowledgeVersion: version }));
   } catch (error) { console.error('同步 Talents 项目知识失败：' + (error as Error).message); }
 }
-await exportSnapshot();
-const taskAutomationService = new TaskAutomationService(store, fixtures, undefined, exportSnapshot);
-const taskPreparationService=new TaskPreparationService(store,fixtures,{prepareSession:(assigneeId,scope,id)=>work.prepare(assigneeId,scope,id)},exportSnapshot);
+const taskAutomationService = new TaskAutomationService(store, fixtures);
+const taskPreparationService=new TaskPreparationService(store,fixtures,{prepareSession:(assigneeId,scope,id)=>work.prepare(assigneeId,scope,id)});
 const skillApplications = new SkillApplicationService({
   package: (role,scope) => getPublishedSkillPackage(store.state,role,scope.resourceId,scope.version,scope.sha256),
   async directory(role,projectId) {
@@ -68,7 +68,6 @@ const skillApplications = new SkillApplicationService({
 const server = createServer(async (request, response) => {
   headers(request, response);
   const json = (code: number, value: unknown) => {
-    if (request.method === 'POST' && code === 200) exportSnapshot().catch(error => console.error('Teams 共享数据导出失败：' + error.message));
     response.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(value));
   };
   try {
@@ -96,6 +95,17 @@ const server = createServer(async (request, response) => {
       const {role,...query}=Object.fromEntries(url.searchParams);
       if(role!=='owner'&&role!=='member')throw new DomainError('请选择角色',400);
       json(200,await taskSessionStream(store.state,role,query as unknown as TaskSessionStreamQuery));return;
+    }
+    if (request.method === 'GET' && path === '/api/shared/teams') {
+      // The revision is read first: a change made while the data is computed then shows up as a newer revision.
+      const revision = sharedChanges.revision;
+      json(200, { revision, snapshot: teamsSnapshot(store.state, fixtures, sourceCatalog, await readProjectWorkspaces(runtimeDir)) }); return;
+    }
+    if (request.method === 'GET' && path === '/api/shared/teams/changes') {
+      const revision = await sharedChanges.next(url.searchParams.get('after') ?? '', 25_000);
+      // While shutting down, the reader's connection must not be kept open for its next request.
+      if (sharedChanges.closed) response.setHeader('Connection', 'close');
+      json(200, { revision }); return;
     }
     if (request.method === 'GET' && path === '/api/talents/knowledge') { const project = url.searchParams.get('project') ?? 'carddemo'; json(200, { talentsOrigin: talentOrigin, artifacts: await projectKnowledge(project), skills: await projectSkillVersions(project) }); return; }
     if (request.method === 'GET' && path === '/api/talents/file') { json(200, await readTalentsFile(url.searchParams.get('artifact') ?? '', Number(url.searchParams.get('version')), url.searchParams.get('path') ?? '')); return; }
@@ -140,7 +150,7 @@ const server = createServer(async (request, response) => {
       if (!body || !['owner', 'member'].includes(body.role)) throw new DomainError('请选择角色', 400);
       if(path==='/api/project-workspaces'){
         if(typeof body.projectId!=='string'||body.projectId!=='teams'&&!projectMembers(store.state,body.projectId).some(member=>member.id===body.role&&member.status==='active'))throw new DomainError('无权配置此项目工作区',403);
-        const saved=await store.exclusive(()=>saveProjectWorkspace(runtimeDir,join(root,'..'),{projectId:body.projectId,directory:body.directory,remoteUrl:body.remoteUrl,baseBranch:body.baseBranch}));await exportSnapshot();json(200,saved);return;
+        const saved=await store.exclusive(()=>saveProjectWorkspace(runtimeDir,join(root,'..'),{projectId:body.projectId,directory:body.directory,remoteUrl:body.remoteUrl,baseBranch:body.baseBranch}));sharedChanges.changed();json(200,saved);return;
       }
       if(path==='/api/delivery-requirements/delete'){json(200,await deletions.remove(body.role,{projectId:body.projectId,taskId:body.taskId,planToken:body.planToken,operationId:body.operationId,revision:body.revision}));return;}
       if (path === '/api/action' && body.action === 'knowledge') throw new DomainError('项目知识由 Talents 发布后自动同步', 400);
@@ -162,8 +172,9 @@ const server = createServer(async (request, response) => {
           else {const task=deliveryRequirement(next,body.projectId,body.taskId);if(!task)throw new DomainError('交付需求不存在',404);
             if(body.action==='accept'){acceptDeliveryRequirement(next,body.role,task,at);queueTaskCollection(next,{projectId:task.projectId,taskId:task.id},at);}
             else if(body.action==='return')returnDeliveryRequirement(body.role,task,body.reason,at);
-            else throw new DomainError('未知需求操作');detail=task.id+' · '+body.action;}
-          next.revision++;next.audit.push({id:next.revision,at,role:body.role,system:'Teams',action:body.action==='create'?'创建交付需求':body.action==='assign'?'分配交付需求':body.action==='accept'?'Owner验收通过':'Owner退回补充',detail,origin:'simulated'});return next;
+            else if(body.action==='confirm'){updateRequirementConfirmations(next,body.role,body.projectId,body.taskId,body.confirmations,at);detail=task.id+' · '+(task.confirmations?.length??0)+' 项确认依据';}
+            else throw new DomainError('未知需求操作');}
+          next.revision++;next.audit.push({id:next.revision,at,role:body.role,system:'Teams',action:body.action==='create'?'创建交付需求':body.action==='assign'?'分配交付需求':body.action==='accept'?'Owner验收通过':body.action==='confirm'?'登记确认依据':'Owner退回补充',detail,origin:'simulated'});return next;
         });json(200,saved);
         if(['create','assign'].includes(body.action))void taskPreparationService.schedule({projectId:body.input.projectId,taskId:body.action==='create'?body.input.id:body.input.taskId}).catch(error=>console.error('自动准备未完成：'+error.message));
         if(body.action==='accept')void taskAutomationService.collect({projectId:body.projectId,taskId:body.taskId}).catch(error=>console.error('需求验收已保存，自动收集未完成：'+error.message));return;
@@ -227,5 +238,5 @@ server.listen(port, '127.0.0.1', async () => {
   );
 });
 let stopping=false;
-async function shutdown(code:number){if(stopping)return;stopping=true;try{await new Promise<void>(resolve=>server.close(()=>resolve()));await exporting;await traceStarting;await stopTraceService();await releaseTaskMaintenance();process.exit(code);}catch(error){console.error(error);process.exit(1);}}
+async function shutdown(code:number){if(stopping)return;stopping=true;try{const closed=new Promise<void>(resolve=>server.close(()=>resolve()));sharedChanges.close();await closed;await traceStarting;await stopTraceService();await releaseTaskMaintenance();process.exit(code);}catch(error){console.error(error);process.exit(1);}}
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {void shutdown(0);});

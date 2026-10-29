@@ -26,6 +26,8 @@ export async function atomicText(path: string, value: string) {
 export async function atomicJson(path: string, value: unknown) { await atomicText(path, JSON.stringify(value, null, 2) + '\n'); }
 export class Store {
   state!: DemoState;
+  /** Called after every committed change, e.g. to wake readers waiting for Teams data to change. */
+  onCommit: () => void = () => {};
   private queue: Promise<unknown> = Promise.resolve();
   constructor(private path = join(runtimeDir, 'state.json')) {}
   async init() {
@@ -59,14 +61,14 @@ export class Store {
   }
   /** Coordinates scoped filesystem work with the same state writer queue. Only commit writes state and updates memory. */
   exclusive<T>(operation:(current:DemoState,commit:(next:DemoState)=>Promise<void>)=>Promise<T>):Promise<T>{
-    const next=this.queue.then(()=>operation(this.state,async state=>{await atomicJson(this.path,state);this.state=state;}));
+    const next=this.queue.then(()=>operation(this.state,async state=>{await atomicJson(this.path,state);this.state=state;this.onCommit();}));
     this.queue=next.catch(()=>undefined);return next;
   }
   mutate(revision: number, operation: (state: DemoState) => DemoState) {
     const next = this.queue.then(async () => {
       if (revision !== this.state.revision) throw new DomainError('另一页面已更新数据，请刷新后重试');
       const state = operation(this.state);
-      await atomicJson(this.path, state); this.state = state; return state;
+      await atomicJson(this.path, state); this.state = state; this.onCommit(); return state;
     });
     this.queue = next.catch(() => undefined); return next;
   }
@@ -77,7 +79,7 @@ export class Store {
   transact(operation: (state: DemoState) => DemoState) {
     const next = this.queue.then(async () => {
       const state = operation(this.state);
-      if (state !== this.state) { await atomicJson(this.path, state); this.state = state; }
+      if (state !== this.state) { await atomicJson(this.path, state); this.state = state; this.onCommit(); }
       return state;
     });
     this.queue = next.catch(() => undefined); return next;

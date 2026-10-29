@@ -8,11 +8,15 @@ import { gzipSync } from 'node:zlib';
 import { dirname, resolve, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Usage: node tools/export-codegraph.mjs --project <Teams project id> --dir <absolute repository directory>
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const args=process.argv.slice(2);
-if(args.length!==2||args[0]!=='--project'||!isAbsolute(args[1]))throw new Error('用法：node talents/tools/export-codegraph.mjs --project <独立业务仓库绝对路径>');
-const project=resolve(args[1]);
-const output = resolve(root, 'talents/data/codegraph');
+const option = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
+const projectId = option('--project') ?? 'carddemo';
+if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,100}$/.test(projectId)) throw new Error('Invalid project id: ' + projectId);
+const directory = option('--dir');
+if (!directory || !isAbsolute(directory)) throw new Error('An absolute business repository directory is required: --dir <absolute directory>');
+const project = resolve(directory);
+const output = resolve(root, 'talents/data/codegraph', projectId);
 const temp = mkdtempSync(resolve(tmpdir(), 'carddemo-codegraph-'));
 const databasePath = resolve(temp, 'codegraph.db');
 const live = new DatabaseSync(resolve(project, '.codegraph/codegraph.db'), { readOnly: true });
@@ -56,7 +60,7 @@ try {
   const count = list => list.reduce((a, n) => ({ ...a, [n.kind]: (a[n.kind] ?? 0) + 1 }), {});
   const sourceDigest = digest.digest('hex');
   const indexedAt = new Date(Number(db.prepare('SELECT max(indexed_at) AS t FROM files').get().t)).toISOString();
-  const metadata = { project: 'carddemo', root: relative(root, project).split(sep).join('/'), toolVersion: meta.indexed_with_version,
+  const metadata = { project: projectId, root: relative(root, project).split(sep).join('/'), toolVersion: meta.indexed_with_version,
     indexedAt, exportedAt: new Date().toISOString(), revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).trim(),
     sourceDigest, snapshotId: createHash('sha256').update(JSON.stringify([meta.indexed_with_version, meta.indexed_with_extraction_version, indexedAt, sourceDigest, nodes, edges])).digest('hex').slice(0, 16),
     files: files.length, nodes: nodes.length, edges: edges.length,

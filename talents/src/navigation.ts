@@ -7,6 +7,9 @@ export const pages: TalentsPage[] = [
   { id: 'team', route: 'team', title: '团队', role: 'admin', groupId: 'team', icon: 'members' },
   { id: 'projects', route: 'projects', title: '项目', role: 'admin', groupId: 'team', icon: 'projects' },
   { id: 'capabilities', route: 'capabilities', title: '知识能力', role: 'admin', groupId: 'team', icon: 'appstore' },
+  // Without a group the sidebar does not list them: the overview opens from the topbar's book icon, the account page from the avatar.
+  { id: 'overview', route: 'overview', title: '总体规划', role: 'admin' },
+  { id: 'account', route: 'account', title: '个人设置', role: 'admin' },
 ];
 export const home: Record<Role, string> = { admin: 'projects', dev: 'projects' };
 

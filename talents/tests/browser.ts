@@ -1,10 +1,11 @@
 // Owner workflow with a local fake gh executable; never submits to GitHub.
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { fakeTeams } from './fixtures/fake-teams.ts';
 
 const port = 45989, origin = 'http://127.0.0.1:' + port;
 const dir = await mkdtemp(join(tmpdir(), 'talents-browser-'));
@@ -12,14 +13,10 @@ await mkdir(join(dir, 'bin'));
 await copyFile('tests/fixtures/fake-gh.mjs', join(dir, 'bin', 'gh'));
 await chmod(join(dir, 'bin', 'gh'), 0o755);
 await writeFile(join(dir, 'fail-once'), '');
-// A clone with the project repository and a fork of it as remotes: PRs default to the fork.
-const checkout = join(dir, 'checkout');
-await mkdir(checkout);
-execFileSync('git', ['init', '-q', checkout]);
-execFileSync('git', ['-C', checkout, 'remote', 'add', 'origin', 'https://github.com/zhuyuloveai/teams-talent-demo.git']);
-execFileSync('git', ['-C', checkout, 'remote', 'add', 'fork', 'git@github.com:tester/teams-talent-demo.git']);
+// Teams, with the Credit Card workspace bound: PRs default to its origin and base branch.
+const teams = await fakeTeams(45979);
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
-  env: { ...process.env, PATH: join(dir, 'bin') + ':' + process.env.PATH, TEST_GH_LOG: join(dir, 'gh.log'), TEST_GH_FAIL: join(dir, 'fail-once'), DEMO_TALENT_PORT: String(port), DEMO_PORT: '45979', DEMO_TALENT_STATE_DIR: join(dir, 'state'), DEMO_SHARED_DIR: join(dir, 'shared'), DEMO_PR_CHECKOUT: checkout }, stdio: 'pipe',
+  env: { ...process.env, PATH: join(dir, 'bin') + ':' + process.env.PATH, TEST_GH_LOG: join(dir, 'gh.log'), TEST_GH_FAIL: join(dir, 'fail-once'), DEMO_TALENT_PORT: String(port), DEMO_PORT: '45979', DEMO_TALENT_STATE_DIR: join(dir, 'state'), DEMO_SHARED_DIR: join(dir, 'shared') }, stdio: 'pipe',
 });
 const stopped = new Promise(resolve => server.once('close', resolve));
 let logs = ''; server.stdout.on('data', b => { logs += b; }); server.stderr.on('data', b => { logs += b; });
@@ -46,8 +43,8 @@ try {
   await page.goto(origin + '/talents/#/projects?project=carddemo&id=a-biz');
   await page.getByRole('button', { name: '提交 PR', exact: true }).click();
   let dialog = page.getByRole('dialog');
-  await dialog.locator('input[value="tester/teams-talent-demo"]').waitFor();
-  assert.equal(await dialog.getByLabel('GitHub 仓库').inputValue(), 'tester/teams-talent-demo');
+  await dialog.locator('input[value="JeffyLiu003/carddemo-java-1025"]').waitFor();
+  assert.equal(await dialog.getByLabel('GitHub 仓库').inputValue(), 'JeffyLiu003/carddemo-java-1025');
   assert.equal(await dialog.getByLabel('目标分支').inputValue(), 'develop');
   await dialog.getByRole('button', { name: '提交 PR', exact: true }).click();
   await dialog.getByText('提交失败', { exact: true }).waitFor();
@@ -62,8 +59,8 @@ try {
     await page.locator('.file-item', { hasText: title }).click();
     await page.getByRole('button', { name: '提交改进 PR', exact: true }).click();
     dialog = page.getByRole('dialog');
-    await dialog.locator('input[value="tester/teams-talent-demo"]').waitFor();
-    if (title === '统一 ADR Skill') assert.equal(await dialog.getByLabel('仓内 Skill 目录').inputValue(), 'workspace/.agents/skills/arch-adr-writing');
+    await dialog.locator('input[value="JeffyLiu003/carddemo-java-1025"]').waitFor();
+    if (title === '统一 ADR Skill') assert.equal(await dialog.getByLabel('仓内 Skill 目录').inputValue(), '.agents/skills/arch-adr-writing');
     await dialog.getByRole('button', { name: '提交 PR', exact: true }).click();
     await page.locator('.wb-side').getByRole('link', { name: '查看 PR' }).waitFor();
   }
@@ -77,18 +74,17 @@ try {
   assert.equal(calls.filter(c => c.method === 'POST' && c.path.endsWith('/pulls')).length, 4);
   assert.ok(!calls.some(c => c.path.includes('/merge')));
   const pulls = calls.filter(c => c.method === 'POST' && c.path.endsWith('/pulls'));
-  assert.ok(pulls.every(c => c.path === 'repos/tester/teams-talent-demo/pulls' && c.body.base === 'develop'));
+  assert.ok(pulls.every(c => c.path === 'repos/JeffyLiu003/carddemo-java-1025/pulls' && c.body.base === 'develop'));
   const trees = calls.filter(c => c.method === 'POST' && c.path.endsWith('/git/trees')).flatMap(c => c.body.tree);
-  assert.ok(trees.length && trees.every(f => f.path.startsWith('workspace/')));
-  assert.ok(trees.some(f => f.path === 'workspace/AGENTS.md'));
-  assert.ok(trees.filter(f => f.path.startsWith('workspace/.agents/skills/arch-adr-writing/')).every(f => f.content.includes('\r\n')));
+  assert.ok(trees.some(f => f.path === 'AGENTS.md') && trees.some(f => f.path.startsWith('docs/knowledge/a-biz/')));
+  assert.ok(trees.filter(f => f.path.startsWith('.agents/skills/arch-adr-writing/')).every(f => f.content.includes('\r\n')));
   await page.screenshot({ path: '/tmp/talents-pr-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: '/tmp/talents-pr-mobile.png', fullPage: true });
   assert.deepEqual(errors, []);
   console.log('管理者入口、知识 PR、建议 PR、失败重试与持久化通过；gh 全部使用本地模拟。');
 } finally {
-  await browser?.close(); server.kill();
+  await browser?.close(); server.kill(); teams.close();
   await stopped;
   await rm(dir, { recursive: true, force: true });
 }

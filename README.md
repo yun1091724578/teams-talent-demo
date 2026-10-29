@@ -171,8 +171,8 @@ macOS 入口为 `./重置任务.command`，Windows 为 `reset-task.cmd`，参数
 ## 数据怎么流动
 
 ```
-Teams ── shared/data/teams/snapshot.json ──▶ Talents
-         成员与角色、项目、代码仓、设计文档、成员共享的会话
+Teams ── HTTP：GET /api/shared/teams（长轮询 /changes）──▶ Talents
+         成员与角色、项目、代码仓（含项目工作区绑定的本机目录、origin、基线分支）、设计文档、项目 Skill、成员共享的会话
 Teams ── shared/data/teams/task-sessions/ ──▶ Talents（读取尚未实现）
          独立需求验收后自动归集的任务会话
 
@@ -183,7 +183,8 @@ Talents ── gh（PR）──▶ 代码仓
            审阅后的知识文件、Skill 修改、AGENTS.md 规则，由开发者审阅合入
 ```
 
-- 每个子目录只有一个写入方。格式定义在 [shared/contracts.ts](shared/contracts.ts)；目录可用 `DEMO_SHARED_DIR` 指定，默认 `shared/data`（不入库）。
+- Talents 使用时 Teams 必须在运行：Talents 每次都向 Teams 读取当前数据，页面在 Teams 数据变化时（长轮询）或重新获得焦点时自动更新。Teams 未运行时，Talents 顶部提示未连接，仍可查看自己的任务和产物。
+- 共享目录的每个子目录只有一个写入方。格式定义在 [shared/contracts.ts](shared/contracts.ts)；目录可用 `DEMO_SHARED_DIR` 指定，默认 `shared/data`（不入库）。
 - 成员、项目、代码仓和设计文档以 Teams 为准，在 Talents 中只读；Talents 只登记本地文档来源。
 - Talents 只有管理员入口，对应 Teams Owner（挖掘、审阅、提交 PR）；Teams 只向 Owner 展示 Talents 入口。没有开发者端，开发者在代码托管平台审阅并合入 PR。
 - 文件类知识和轨迹诊断建议都以 PR 提交，Talents 只保存 PR 链接和提交内容，不查询合入状态，也不直接更新 Teams 中的 Skill 版本。

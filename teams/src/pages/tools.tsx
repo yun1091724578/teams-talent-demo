@@ -22,7 +22,7 @@ export function NativeControls({ compact = false }: { compact?: boolean }) {
   return <div className="native-controls">
     {!compact && <Descriptions column={1} size="small" items={[
       { key: 'version', label: '配套实例', children: status?.icode.version ?? '正在探测…' },
-      { key: 'source', label: '发现方式', children: status?.icode.source === 'official' ? '官方安装位置自动发现' : status?.icode.source === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : status?.icode.source === 'bundled' ? '仓库内开发包' : status?.icode.source === 'missing' ? '未发现可用安装' : '正在探测…' },
+      { key: 'source', label: '发现方式', children: status?.icode.source === 'official' ? '官方安装位置自动发现' : status?.icode.source === 'override' ? 'DEMO_ICODE_BINARY 显式配置' : status?.icode.source === 'uv' ? 'uv tool 安装回执' : status?.icode.source === 'pipx' ? 'pipx 虚拟环境' : status?.icode.source === 'path' ? 'PATH 中的 icode 可执行文件' : status?.icode.source === 'bundled' ? '仓库内开发包' : status?.icode.source === 'missing' ? '未发现可用安装' : '正在探测…' },
       { key: 'directory', label: '项目工作目录', children: <Mono>{status ? status.icode.workspace ?? '尚未配置项目工作区' : '正在读取…'}</Mono> },
     ]} />}
     {status?.workspaceError && <Alert type="info" title="需要配置项目工作区" description={status.workspaceError} />}

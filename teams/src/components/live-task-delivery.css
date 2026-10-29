@@ -3,6 +3,16 @@
 .task-node-sections .framework-card p{line-height:1.75;overflow-wrap:anywhere}
 .task-node-sections .task-node-requirement{font-size:14px;margin:0 0 12px;color:var(--ui-color-text)}
 .task-node-input-summary,.task-node-execution-summary{display:flex;gap:8px 18px;flex-wrap:wrap;color:var(--ui-color-muted);font-size:12px;margin-bottom:12px}
+.task-confirmations{margin:0 0 14px;padding:10px 12px;border:1px solid var(--ui-color-divider);border-radius:6px;background:var(--ui-color-fill)}
+.task-confirmations-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.task-confirmations-heading>div{min-width:0}
+.task-confirmations h3{margin:0;font-size:13px}
+.task-confirmations-heading p{margin:4px 0 0;font-size:11px}
+.task-confirmations .ant-list{margin-top:6px}
+.task-confirmations .ant-list-item{padding:8px 0}
+.task-confirmations .ant-list-item p{margin:4px 0 0}
+.task-confirmations .ant-btn{font-size:11px}
+.task-confirmations .ant-space{font-size:12px}
 .task-node-sections .ant-collapse{margin-top:10px}
 .task-node-sections .ant-collapse-header{padding-inline:0!important}
 .task-node-sections .ant-collapse-content-box{padding-inline:0!important}

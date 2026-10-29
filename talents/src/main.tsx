@@ -2,32 +2,33 @@
 // Teams links here as /talents?role=owner|member#/<page>?project=<id>; the role picks the entry.
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Alert, App as AntApp, Button, ConfigProvider, Popconfirm, Select, Spin } from 'antd';
+import { Alert, App as AntApp, Button, ConfigProvider, Select, Spin, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN.js';
-import { ReloadOutlined } from '@ant-design/icons';
+import { ReadOutlined } from '@ant-design/icons';
 import { FrameworkSidebar } from './vendor/teams/components/framework-sidebar.tsx';
 import { teamsTheme, type UiThemeMode } from './vendor/teams/theme.ts';
 import { designSystemCss } from './vendor/teams/design-system.ts';
 import { frameworkCss } from './vendor/teams/framework-styles.ts';
 import { bootstrap, type Boot } from './api.ts';
-import { home, levelHash, pages } from './navigation.ts';
+import { levelHash, pages } from './navigation.ts';
 import { TalentsProvider, useTalents } from './store.tsx';
 import { artifact, member, project } from './demo/model.ts';
 import type { Role } from './types.ts';
 import { Projects, Team } from './pages/level.tsx';
 import { Capabilities } from './pages/capabilities.tsx';
+import { Overview } from './pages/overview.tsx';
+import { Account } from './pages/account.tsx';
 import './shell.css';
 import './talents.css';
 const css = document.createElement('style'); css.textContent = designSystemCss + frameworkCss; document.head.prepend(css);
 
 const content: Record<string, () => ReactNode> = {
-  team: Team, projects: Projects, capabilities: Capabilities,
+  team: Team, projects: Projects, capabilities: Capabilities, overview: Overview, account: Account,
 };
 
 function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): void }) {
-  const { state: st, teams, route, role, go, reset, toast, teamsLink } = useTalents();
+  const { state: st, teams, route, role, go, teamsLink } = useTalents();
   const [width, setWidth] = useState(200); // the Teams sidebar default
-  useEffect(() => { if (teams.from === 'none') toast('还没有读取到 iCode Teams 的数据，请先启动 Teams'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const person = (r: Role) => member(st, r === 'admin' ? st.team.admin : st.team.me)?.name ?? '未读取到 Teams 成员';
   const page = route.page, Page = content[page.id];
   // The level shown (a project, or the team) and the artifact open in its review tab.
@@ -36,7 +37,6 @@ function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): vo
   const opened = level !== undefined && (!route.params.tab || route.params.tab === 'review') ? artifact(st, route.params.id) : null;
   const crumbs: { label: string; href?: string }[] = focus ? [{ label: page.title, href: '#/projects' }, { label: focus.name }] : [{ label: page.title }];
   if (opened) { crumbs[crumbs.length - 1].href = levelHash(level!, 'review'); crumbs.push({ label: opened.name }); }
-  const resetDemo = () => reset().then(() => { go('#/' + home[role]); toast('已恢复初始数据'); }, e => toast('重置失败：' + (e as Error).message));
   const projects = <div role="group" aria-label="项目列表">{st.projects.map(p => <a key={p.id} className={'child' + (focus?.id === p.id ? ' active' : '')} href={levelHash(p.id)} title={p.name} aria-current={focus?.id === p.id ? 'page' : undefined}>{p.name}</a>)}</div>;
 
   return <div className="framework-root" style={{ '--ui-shell-sidebar': width + 'px' } as CSSProperties}>
@@ -55,11 +55,11 @@ function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): vo
           </nav>
           <div className="topbar-right">
             <span className="caption">{person('admin')} · 管理员</span>
-            <Popconfirm title="重置数据？" description="新登记的本地文档来源、任务、修订和提交记录会被清除，恢复到初始状态。团队、成员和项目来自 iCode Teams，不受影响。" okText="重置" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={resetDemo}>
-              <Button type="text" size="small" aria-label="重置数据" title="重置数据" icon={<ReloadOutlined />}><span className="compact-action-label">重置数据</span></Button>
-            </Popconfirm>
+            <Tooltip title="总体规划"><Button variant="text" color={page.id === 'overview' ? 'primary' : 'default'} size="small" aria-label="总体规划" icon={<ReadOutlined />} onClick={() => go('#/overview')} /></Tooltip>
           </div>
         </header>
+        {!teams.online && <Alert type="warning" banner showIcon title="未连接 iCode Teams"
+          description={(st.projects.length ? '项目、成员和来源显示的是最近一次读取的数据' : '读取不到团队、项目和来源') + '，Talents 的任务和产物可以照常查看。请启动 iCode Teams，连接后自动更新。'} />}
         <div className={'page-scroll' + (opened ? ' workbench-scroll' : '')} key={page.id + (focus?.id ?? '')}><Page /></div>
       </main>
     </div>

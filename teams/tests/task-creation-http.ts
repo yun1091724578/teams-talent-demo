@@ -48,6 +48,17 @@ try {
     assert.deepEqual(await post('/api/workspace', { kind: 'issue.create', revision, payload: issue }), saved);
     await post('/api/workspace', { kind: 'issue.create', payload: { ...issue, severity: 'low' } }, 409);
     await post('/api/workspace', { role: 'member', kind: 'issue.create', payload: { ...issue, id: 'ISSUE-' + randomUUID() } }, 403);
+    const confirmations = [{ item: '活动期间', basis: '业务确认：2026-11-01 至 2027-01-31', confirmedBy: '林悦' }];
+    await post('/api/delivery-requirements', { role: 'member', action: 'confirm', projectId, taskId: input.id, confirmations }, 403);
+    await post('/api/delivery-requirements', { action: 'confirm', projectId, taskId: input.id, confirmations: [{ item: '', basis: '依据', confirmedBy: '林悦' }] }, 400);
+    const confirmed = await post('/api/delivery-requirements', { action: 'confirm', projectId, taskId: input.id, confirmations });
+    const recorded = confirmed.workspace.deliveryRequirements.find((task: any) => task.id === input.id);
+    assert.equal(recorded.confirmations[0].confirmedBy, '林悦'); assert.ok(recorded.confirmations[0].confirmedAt);
+    const confirmedContext = await get('/api/collaboration/context?' + query);
+    assert.deepEqual(confirmedContext.agreement.criteria, ['活动期间']); assert.deepEqual(confirmedContext.agreement.confirmations, recorded.confirmations);
+    assert.notEqual(confirmedContext.basisDigest, context.basisDigest);
+    const prepareInput = confirmedContext.nodeContract.inputs.find((item: any) => item.id === 'confirmations');
+    assert.equal(prepareInput.references[0].source, 'owner'); assert.equal(prepareInput.references[0].title, '活动期间');
     const after = await get('/api/state'), next = projectOverview(after, data, projectId);
     assert.equal(next.counts.all, model.counts.all + 1); assert.equal(next.counts.issues, model.counts.issues + 1); assert.equal(next.counts.open, model.counts.open + 1);
     assert.deepEqual(after.workspace.deliveryRequirements[0], original.workspace.deliveryRequirements[0]);

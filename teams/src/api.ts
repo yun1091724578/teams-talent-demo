@@ -22,7 +22,7 @@ export interface NativeStatus {
   selectedTerminal?: string;
   terminalError?: string;
   workspaceError?: string;
-  icode: { installed: boolean; path: string; version: string | null; workspace: string | null; sessionId: string; sessionAvailable: boolean; active: { pid: number; application: string | null; tty: string } | null; source?: 'override' | 'official' | 'bundled' | 'missing'; notes?: string[] };
+  icode: { installed: boolean; path: string; version: string | null; workspace: string | null; sessionId: string; sessionAvailable: boolean; active: { pid: number; application: string | null; tty: string } | null; source?: 'override' | 'official' | 'uv' | 'pipx' | 'path' | 'bundled' | 'missing'; notes?: string[] };
   opencode: { installed: boolean; path: string | null; version: string | null; unsupportedReason?: string; notes?: string[] };
   verification: { status: string; at: string; messageCount: number; note: string } | null;
 }

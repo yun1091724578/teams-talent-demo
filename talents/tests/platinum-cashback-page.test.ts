@@ -25,7 +25,11 @@ test('scenario registration is additive, idempotent and does not migrate the exi
 test('existing HTTP client-state round trip changes only the single artifact',()=>{
  const previous=seedState();previous.artifacts=previous.artifacts.filter(item=>item.id!==platinumCashbackPage.artifactId);
  const client=clientState(previous,snapshot as any),added=appendPlatinumCashbackPage(client as any),saved=ownedState(added.state,previous);
- assert.deepEqual({...saved,artifacts:saved.artifacts.filter(item=>item.id!==platinumCashbackPage.artifactId)},previous);
+ // The first save also records the initial version of a Teams document set Talents had no record of (iCode Teams);
+ // repositories without Talents metadata get none.
+ assert.deepEqual(Object.keys(saved.sourceMeta).filter(id=>!(id in previous.sourceMeta)),['docset:teams']);
+ assert.deepEqual({...saved,artifacts:saved.artifacts.filter(item=>item.id!==platinumCashbackPage.artifactId),sourceMeta:previous.sourceMeta},previous);
+ assert.deepEqual(Object.fromEntries(Object.keys(previous.sourceMeta).map(id=>[id,saved.sourceMeta[id]])),previous.sourceMeta);
  assert.deepEqual(saved.artifacts.at(-1),platinumCashbackPageArtifact());
 });
 test('published scenario contains exact full texts and verified repository references, without generated delivery facts',async()=>{
