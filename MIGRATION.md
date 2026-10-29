@@ -87,7 +87,7 @@ node --import tsx scripts/migrate-native-session-location.ts \
 
 | 原来 | 现在 |
 |---|---|
-| Talent 服务（45980）与 `/api/integrations/talent/*` | 删除。Teams 只与共享目录交互（`teams/server/shared-data.ts`）：启动时及每次写操作成功后，导出 `shared/data/teams/snapshot.json`；从 `shared/data/talents/` 读取已发布的知识，缺失时读取 `shared/seed/`。需要提供给 Talents 的新数据，加到 `shared/contracts.ts` 的 `TeamsSnapshot`，并在 `teamsSnapshot()` 中导出 |
+| Talent 服务（45980）与 `/api/integrations/talent/*` | 删除。Teams 通过只读接口 `GET /api/shared/teams` 向 Talents 提供当前数据（`teams/server/shared-data.ts` 的 `teamsSnapshot()` 按请求计算），`GET /api/shared/teams/changes?after=<revision>` 供 Talents 长轮询；从 `shared/data/talents/` 读取已发布的知识，缺失时读取 `shared/seed/`。需要提供给 Talents 的新数据，加到 `shared/contracts.ts` 的 `TeamsSnapshot`，并在 `teamsSnapshot()` 中返回 |
 | Owner 点「发起项目知识整合」，即 `perform('knowledge')` | 按钮已删除，`POST /api/action {action:'knowledge'}` 返回 400。Talents 为 `carddemo` 发布知识后，`GET /api/state` 和 `/api/bootstrap` 会自动执行 `knowledge` 转换（审计记录的 system 仍为 `Teams`，detail 为「Talents 已发布项目知识：…」）。读取 `state.knowledge`，以及新增的 `state.knowledgeVersion`（如「信用卡营销返现业务知识 v2」）。领域层的 `transition(state, 'knowledge', role, { knowledgeVersion? })` 仍可直接调用 |
 | `candidate` / `evaluate` / `release` / `adopt`、`'analysis.run'` | `Action`、`WorkspaceAction` 类型，以及 `state.evolution`、`workspace.analysis` 字段都保留，但服务端返回 400（能力演进与轨迹分析已迁到 Talents）。`adoptedSkill` / `adoptedAgent` 不变 |
 | `getBusinessKnowledge()`（`src/api.ts`），返回 `SourcePluginAsset[]` | `getTalentsKnowledge(projectId)` 返回 `{ talentsOrigin, artifacts: PublishedArtifact[] }`；`getTalentsFile(artifact, path)` 读取原文 |
@@ -99,7 +99,7 @@ node --import tsx scripts/migrate-native-session-location.ts \
 | 本机配置项 `DEMO_TALENT_STATE_DIR` | 仍被接受，但不再使用。新增 `DEMO_SHARED_DIR`（共享目录，默认 `shared/data`）和 `DEMO_SHARED_SEED_DIR`（默认 `shared/seed`） |
 | Talent 的 `GET /api/task-inputs`（独立需求的知识与 Skill） | 删除。Teams 用 `sharedTaskInputs(state, projectId, taskId)` 自行组装：本需求内容（`origin: 'teams-task'`）+ Talents 已发布的项目知识（`origin: 'talents-shared'`，未发布时为空）+ 已登记 Skill 正文。`knowledge.status` 恒为 `ready`；Skill 的 `availability` 由 `talent-registered-asset` 改为 `teams-registered-package` |
 | Talent 的 `POST /api/task-inputs/register`（Owner 登记需求） | 删除，不再需要登记：任务输入总会包含本需求内容 |
-| Talent 的 `POST /api/task-sessions`（验收后上报会话） | 删除。`exportTaskSessions()` 写入 `shared/data/teams/task-sessions/<幂等键哈希>.json`，回执 `id` 以 `SHARED-` 开头；重复上报返回同一回执。上报成功后这些会话也会出现在 `snapshot.json` 的 `sessions` 中。Talents 读取它们尚未实现 |
+| Talent 的 `POST /api/task-sessions`（验收后上报会话） | 删除。`exportTaskSessions()` 写入 `shared/data/teams/task-sessions/<幂等键哈希>.json`，回执 `id` 以 `SHARED-` 开头；重复上报返回同一回执。上报成功后这些会话也会出现在 `GET /api/shared/teams` 的 `sessions` 中。Talents 读取它们尚未实现 |
 | 测试中启动 `server/talent.ts`，或点击知识整合按钮 | 不再启动 Talent。参考 `teams/tests/workflow-http.ts` 的 `publishFromTalents()`：向临时共享目录写入 `knowledge.json`，同时把 `DEMO_SHARED_SEED_DIR` 指向空目录，避免读到仓库里的初始数据。要模拟会话上报失败，在 `<共享目录>/teams/task-sessions` 位置放一个普通文件（见 `tests/delivery-requirements-http.ts`） |
 
 ## 四、数据变化

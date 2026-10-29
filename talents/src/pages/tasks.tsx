@@ -273,7 +273,7 @@ export function TaskForm({ level: fixed, preset, onClose, onCreated }: { level?:
   const [ctxSkills, setCtxSkills] = useState<string[]>(copied?.context?.skills ?? []), [ctxDocs, setCtxDocs] = useState<string[]>(copied?.context?.docs ?? []), [ctxNote, setCtxNote] = useState(copied?.context?.note ?? '');
   const [picking, setPicking] = useState<'sessions' | 'prs' | null>(null);
 
-  const own = levelSources(st, level), repos = own.filter(s => s.type === 'repo');
+  const own = levelSources(st, level), repos = own.filter(s => s.type === 'repo' && s.bound);
   const pool = cap.input === 'docs' ? own.filter(s => s.type === 'docs') : cap.input === 'repo+pr' ? repos.filter(s => s.prs) : repos;
   const src = cap.input === 'sessions' ? 's-sessions' : pool.some(s => s.id === chosen) ? chosen : pool[0]?.id ?? null;
   // Update vs rebuild: only when the capability declares an update and this input already has knowledge.

@@ -5,10 +5,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { graphView, type GraphOptions } from '../src/codegraph-model.ts';
-import { codegraphSnapshot, withCodegraph, withoutCodegraph } from '../server/codegraph.ts';
+import { codegraphSnapshot, hasCodegraph, withCodegraph, withoutCodegraph } from '../server/codegraph.ts';
 import { seedState } from '../server/seed.ts';
 
-const graph = codegraphSnapshot();
+const graph = codegraphSnapshot('carddemo')!;
 const options: GraphOptions = { level: 'symbol', service: '', tests: true, crossCalls: true, kinds: [], relation: '', focus: '', hops: 1 };
 
 test('archived snapshot has valid endpoints and source locations without reading the current workspace', () => {
@@ -27,7 +27,7 @@ test('archived snapshot has valid endpoints and source locations without reading
 });
 
 test('archived JSON and compressed CodeGraph database match their manifest checksums', () => {
-  const directory = resolve('data/codegraph/snapshots', graph.metadata.snapshotId);
+  const directory = resolve('data/codegraph/carddemo/snapshots', graph.metadata.snapshotId);
   const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'));
   for (const name of ['graph.json', 'codegraph.db.gz']) {
     assert.equal(createHash('sha256').update(readFileSync(resolve(directory, name))).digest('hex'), manifest.checksums[name]);
@@ -63,8 +63,22 @@ test('saved simulated statistics cannot replace the authoritative index metadata
   const state = seedState(), original = structuredClone(state);
   const artifact = withCodegraph(state).artifacts.find(a => a.id === 'a-cg-java')!;
   assert.deepEqual(artifact.stats?.map(([, value]) => Number(value.replaceAll(',', ''))), [graph.metadata.files, graph.metadata.nodes, graph.metadata.edges]);
-  assert.equal(artifact.published?.basis?.commit, graph.metadata.revision);
+  // The archive is not tied to a commit of the bound repository: the version names the snapshot instead.
+  assert.equal(artifact.published?.basis, null);
+  assert.equal(artifact.published?.note, '归档图谱快照 · ' + graph.metadata.snapshotId.slice(0, 8));
+  assert.equal(artifact.graphSnapshot, graph.metadata.snapshotId);
   assert.deepEqual(state, original);
+});
+
+test('snapshots are read per project; a project without one has none', () => {
+  assert.equal(graph.metadata.project, 'carddemo');
+  assert.equal(codegraphSnapshot('teams'), null);
+  assert.equal(hasCodegraph('../carddemo'), false);
+  const state = seedState();
+  state.artifacts.push({ ...structuredClone(state.artifacts.find(a => a.id === 'a-cg-java')!), id: 'a-cg-teams', projectId: 'teams' });
+  const shown = withCodegraph(state);
+  assert.equal(shown.artifacts.find(a => a.id === 'a-cg-teams')!.graphSnapshot, undefined);
+  assert.equal(shown.artifacts.find(a => a.id === 'a-cg-java')!.graphSnapshot, graph.metadata.snapshotId);
 });
 
 test('saving the shown state back does not store the snapshot values', () => {

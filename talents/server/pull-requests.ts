@@ -1,17 +1,13 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Artifact, Submission } from './model.ts';
 import { HttpError } from './model.ts';
 import { publishedText } from './export.ts';
 import { minerIndex, readContent } from './content.ts';
-import { repositoryRoot } from './config.ts';
+import type { TeamsSnapshot } from '../../shared/contracts.ts';
 
-export interface SubmitTarget {
-  repository: string; base: string; note: string; skillDirectory?: string;
-  /** The project's directory inside the repository; every submitted path is under it. */
-  directory?: string;
-}
+export interface SubmitTarget { repository: string; base: string; note: string; skillDirectory?: string }
 export type Github = (method: string, path: string, body?: unknown) => Promise<any>;
 export const github: Github = (method, path, body) => new Promise((resolve, reject) => {
   const child = spawn('gh', ['api', '--method', method, path, ...(body ? ['--input', '-'] : [])], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -33,29 +29,16 @@ function safePath(path: string) {
   return path;
 }
 
-/** The GitHub repository each project's code lives in, the project's directory inside it, and the branch its data is on.
- *  Assumed for the demo: 信用卡营销交付 is the workspace/ directory of teams-talent-demo, maintained on develop. */
-export const projectRepositories: Record<string, { upstream: string; directory: string; base: string }> = {
-  carddemo: { upstream: 'zhuyuloveai/teams-talent-demo', directory: 'workspace', base: 'develop' },
-};
-/** The local clone whose remotes decide between the upstream repository and a fork of it. */
-const checkout = process.env.DEMO_PR_CHECKOUT ?? repositoryRoot;
-const gitRemotes = () => new Promise<string[]>(resolve => execFile('git', ['-C', checkout, 'remote', '-v'], (error, stdout) =>
-  resolve(error ? [] : stdout.split('\n').map(line => line.split(/\s+/)[1]).filter(Boolean))));
 const githubRepository = (url: string) => /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
 
-export interface DefaultTarget { repository: string; base: string; fork: boolean; directory: string }
-/** Where a project's PRs go by default: a fork of its repository among the local git remotes, else the repository itself; always the project's branch. */
-export async function defaultTarget(projectId: string | null, gh: Github = github, remotes = gitRemotes): Promise<DefaultTarget> {
-  const project = projectId ? projectRepositories[projectId] : undefined;
-  if (!project) throw new HttpError('这个项目还没有关联 GitHub 仓库，请手动填写', 404);
-  const upstream = project.upstream.toLowerCase();
-  const candidates = [...new Set((await remotes()).map(githubRepository).filter((r): r is string => !!r && r.toLowerCase() !== upstream))];
-  for (const candidate of candidates) {
-    const info = await gh('GET', 'repos/' + candidate).catch(() => null);
-    if (info?.fork && [info.parent?.full_name, info.source?.full_name].some(name => name?.toLowerCase() === upstream)) return { repository: info.full_name, base: project.base, fork: true, directory: project.directory };
-  }
-  return { repository: project.upstream, base: project.base, fork: false, directory: project.directory };
+export interface DefaultTarget { repository: string; base: string }
+/** Where a project's PRs go by default: the origin and base branch of the workspace bound to the project in Teams. */
+export function defaultTarget(snapshot: TeamsSnapshot, projectId: string | null): DefaultTarget {
+  const repo = snapshot.projects.find(p => p.id === projectId)?.repositories.find(r => r.path);
+  if (!repo) throw new HttpError('这个项目还没有在 iCode Teams 中绑定代码仓，请先在 Teams 项目概览中配置工作区', 404);
+  const repository = githubRepository(repo.remote ?? '');
+  if (!repository) throw new HttpError('项目代码仓的 origin 不在 GitHub 上（' + (repo.remote ?? '') + '），请手动填写', 404);
+  return { repository, base: repo.branch ?? 'main' };
 }
 
 export function knowledgeFiles(a: Artifact) {
@@ -73,7 +56,7 @@ export async function submitPullRequest(a: Artifact, target: SubmitTarget, sugge
   const repository = target.repository.trim().replace(/^https:\/\/github.com\//, '').replace(/\.git$/, '');
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !target.base.trim()) throw new HttpError('请填写 GitHub 仓库 owner/repo 和目标分支');
   if (a.kind === 'index') throw new HttpError('远端索引无需提交 PR');
-  const root = 'repos/' + repository, directory = target.directory ?? '';
+  const root = 'repos/' + repository;
   // Each gh call is a round trip to GitHub, so only small responses are read and independent ones run together.
   onStep(0);
   const head = await gh('GET', root + '/git/ref/heads/' + pathOf(target.base)).catch(error => {
@@ -97,7 +80,7 @@ export async function submitPullRequest(a: Artifact, target: SubmitTarget, sugge
     if (!suggestion) throw new HttpError('建议不存在', 404);
     title = suggestion.title;
     if (suggestion.kind === 'skill') {
-      const dir = safePath(target.skillDirectory?.trim() || posix.join(directory, '.agents/skills', suggestion.skill));
+      const dir = safePath(target.skillDirectory?.trim() || posix.join('.agents/skills', suggestion.skill));
       files = await Promise.all(suggestion.files.map(async (f: any) => {
         const path = safePath(posix.join(dir, safePath(f.path)));
         const before = await read(path);
@@ -107,12 +90,12 @@ export async function submitPullRequest(a: Artifact, target: SubmitTarget, sugge
     } else {
       const rules = JSON.parse(readContent('trajectory/' + a.topic + '/rules.json') ?? '{}');
       if (!rules[suggestionId]) throw new HttpError('建议缺少项目规则');
-      const path = safePath(posix.join(directory, 'AGENTS.md')), before = await read(path);
+      const path = 'AGENTS.md', before = await read(path);
       files = [{ path, text: like(before, before.trimEnd() + '\n\n<!-- Talents: ' + a.id + '/' + suggestionId + ' -->\n- ' + rules[suggestionId] + '\n') }];
     }
   } else {
     if (!a.draft && a.submission) throw new HttpError('没有待提交的新版本');
-    files = knowledgeFiles(a).map(f => ({ ...f, path: safePath(posix.join(directory, f.path)) }));
+    files = knowledgeFiles(a);
   }
   if (!files.length) throw new HttpError('没有可提交的文件');
   const version = (a.submission?.version ?? a.published?.version ?? 0) + 1;

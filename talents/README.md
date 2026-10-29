@@ -12,25 +12,29 @@ npm run dev        # 构建页面（dist/）并启动，打开 http://127.0.0.1:
 
 ## 与 iCode Teams 的数据交换
 
-数据格式见 `shared/contracts.ts`，共享数据目录默认是仓库根目录的 `shared/data/`（`DEMO_SHARED_DIR` 可改）。
+数据格式见 `shared/contracts.ts`。
+
+**从 Teams 读取（HTTP）**：Talents 使用时 Teams 必须在运行。团队成员（owner / member）、项目及其代码仓、设计文档、项目 Skill 和共享会话，每次都向 Teams 的 `GET /api/shared/teams` 读取，不在 Talents 中保存。页面向 Talents 服务长轮询 `GET /api/teams?after=<revision>`，服务再等待 Teams 的 `GET /api/shared/teams/changes`：Teams 数据一变（包括在项目概览中绑定工作区），页面就替换来自 Teams 的部分；页面重新获得焦点时也会立即检查一次。Teams 未运行时，顶部提示“未连接 iCode Teams”，页面保留最近一次读到的 Teams 数据，Talents 的任务和产物照常可看，每 5 秒重试；需要 Teams 的操作（读取项目 Skill、PR 默认目标）返回 503。
+
+**写入共享目录**：共享数据目录默认是仓库根目录的 `shared/data/`（`DEMO_SHARED_DIR` 可改）。
 
 | 文件 | 写入方 | 内容 |
 |---|---|---|
-| `teams/snapshot.json` | Teams | 团队成员（owner / member）、项目及其代码仓和设计文档、共享会话 |
 | `talents/knowledge.json` | Talents | 远端索引，以及尚未改为 PR 提交的已有产物；已提交 PR 的产物不再写入 |
 | `talents/files/<产物>/v<版本>/<路径>` | Talents | 上述产物对应版本的文件 |
 
-共享目录中缺少某个文件时，读取 `shared/seed/` 下同一路径的提交版本。修改 `server/seed.ts` 或 `content/` 后，运行 `npm run seed:shared` 重新生成 `shared/seed/talents/`。
+Teams 读取时共享目录中缺少某个文件，会读取 `shared/seed/` 下同一路径的提交版本。修改 `server/seed.ts` 或 `content/` 后，运行 `npm run seed:shared` 重新生成 `shared/seed/talents/`。
 
 Teams 数据在 Talents 中的对应关系：
 
 - **角色**：只有管理员入口，对应 Teams 的 Owner（默认林悦）；Teams 只向 Owner 展示 Talents 入口。Teams 用 `/talents?role=owner#/<页面>?project=<项目>` 打开指定项目，页面为 `sources`、`tasks`、`review`。旧的 `dev-knowledge`、`knowledge`、`local` 地址转到“项目”。
-- **项目**：Teams 中的项目，不显示只读导入的项目。没有本机代码仓和设计文档的项目显示为空。
-- **代码仓**：Teams 项目中有本机路径的代码仓，只读。最近提交、PR 列表是 Talents 的 mock 数据。
+- **项目**：Teams 中的全部项目。从其他 Teams 导入、在 Teams 中只读浏览的项目（iCode Teams）标“导入项目”。
+- **代码仓**：Teams 项目的代码仓，只读。路径、远端（origin）和分支取自 Teams 项目概览中绑定的项目工作区；未绑定的代码仓显示“未在 iCode Teams 绑定本机目录”，不能用来新建知识任务。代码仓 ID 与绑定无关，绑定或改绑不影响已有任务和产物。最近提交、PR 列表是 Talents 的 mock 数据。
+- **代码图谱**：每个项目的归档快照在 `data/codegraph/<项目>/`，按项目读取；目前只有 Credit Card（carddemo）有归档，视为它绑定的业务代码仓的扫描结果。归档不对应业务仓的某个提交，产物版本显示快照编号，不显示基于的提交。
 - **文档集**：每个 Teams 项目的设计文档合成一个文档集“<项目名>文档”，只读。版本记录和最近检查由 Talents 保存；“检查更新”发现 Teams 中的文档有增删时记录新版本。
 - **本地文档来源**：Talents 唯一自己登记和保存的来源（例如“银行开发规范”）。
 - **会话**：Teams 中成员共享的会话，列在项目来源中；都可以选来做轨迹洞察，演示中每次分析都产出同一份预置的诊断报告。
-- **项目 Skill**：Teams 项目的“项目可用 Skill”，列在项目来源中，SKILL.md 从仓库只读。轨迹洞察的 Skill 建议以 PR 修改代码仓中的 Skill 文件，Talents 不直接更新 Teams 中的 Skill 版本，也不查询 PR 是否合入。
+- **项目 Skill**：Teams 项目的“项目可用 Skill”，列在项目来源中，SKILL.md 只读：Credit Card 的从本仓库读取，iCode Teams 的随 Teams 数据一起提供（它们只存在于导入快照中）。轨迹洞察的 Skill 建议以 PR 修改代码仓中的 Skill 文件，Talents 不直接更新 Teams 中的 Skill 版本，也不查询 PR 是否合入。
 
 Talents 自己的状态（任务、产物、PR 提交记录与提交内容、诊断建议的处理、本地文档来源、对 Teams 来源的元数据）保存在 `.runtime/state.json`（`DEMO_TALENT_STATE_DIR` 可改）。
 
@@ -38,7 +42,7 @@ Talents 自己的状态（任务、产物、PR 提交记录与提交内容、诊
 
 “提交 PR”和“提交改进 PR”由服务端调用本机 `gh api` 完成，需要先 `gh auth login`，账号对目标仓库有写权限。服务端不会修改本机任何代码仓的工作区。
 
-目标仓库：每个项目关联一个 GitHub 仓库和仓内目录（`server/pull-requests.ts` 的 `projectRepositories`）。目前假设“信用卡营销交付”就是本仓库 `zhuyuloveai/teams-talent-demo` 的 `workspace/` 目录。打开提交弹窗时，服务端查看本仓库的 `git remote`（`DEMO_PR_CHECKOUT` 可指定其他本地克隆）：有这个仓库的 fork 就默认提交到 fork，没有就提交到项目仓库；目标分支默认都是 `main`。弹窗中可以修改。
+目标仓库：默认是 Teams 项目概览中为该项目绑定的工作区的 origin（解析为 GitHub `owner/repo`）和交付基线分支，文件写在仓库根目录（知识文件在 `docs/knowledge/<产物>/`）。项目未绑定工作区，或 origin 不在 GitHub 上时，弹窗提示原因并链接到 Teams，可以手动填写。演示前在 Teams 中为 Credit Card 绑定 `JeffyLiu003/carddemo-java-1025` 的本机克隆，演示账号需要对它有写权限。
 
 提交过程：
 
@@ -59,10 +63,9 @@ Talents 自己的状态（任务、产物、PR 提交记录与提交内容、诊
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `DEMO_TALENT_PORT` | 45980 | Talents 端口 |
-| `DEMO_PORT` | 45970 | Teams 端口，用于“返回 iCode Teams”链接 |
+| `DEMO_PORT` | 45970 | Teams 端口：读取 Teams 数据，以及“返回 iCode Teams”链接 |
 | `DEMO_SHARED_DIR` | `<仓库>/shared/data` | 共享数据目录 |
 | `DEMO_TALENT_STATE_DIR` | `talents/.runtime` | Talents 状态目录 |
-| `DEMO_PR_CHECKOUT` | `<仓库>` | 判断 PR 默认提交到 fork 还是项目仓库时，读取哪个本地克隆的 `git remote` |
 
 也可以写在 `talents/.local/config.json`（格式与 `teams/.local/config.json` 相同，`DEMO_LOCAL_CONFIG` 可指定其他文件）。
 
@@ -71,23 +74,25 @@ Talents 自己的状态（任务、产物、PR 提交记录与提交内容、诊
 | 接口 | 说明 |
 |---|---|
 | `GET /api/health` | 服务信息 |
-| `GET /api/bootstrap` | Talents 状态合并 Teams 数据（团队、项目、来源、会话），以及 Teams 地址 |
+| `GET /api/bootstrap` | Talents 状态合并 Teams 数据（团队、项目、来源、会话），以及 Teams 的地址、是否在线和数据版本（`teams: { origin, online, revision, error? }`） |
+| `GET /api/teams?after=<revision>` | 来自 Teams 的部分。带 `after` 时先等待 Teams 数据变化（最长约 25 秒），没有变化返回 `{ changed: false, teams }`；变化或不带 `after` 时返回 `{ changed: true, teams, data }` |
 | `PUT /api/state` | 保存页面上的状态（`{ revision, state }`，按 revision 检查冲突）。服务端去掉来自 Teams 的部分，只保存 Talents 自己的数据，然后更新共享目录中的知识 |
 | `POST /api/reset` | 恢复初始数据 |
-| `GET /api/pull-requests/target?project=<项目>` | 项目默认的 PR 目标：`{ repository, base, fork, directory }` |
+| `GET /api/pull-requests/target?project=<项目>` | 项目默认的 PR 目标：`{ repository, base }`，取自 Teams 中绑定的工作区；未绑定时 404，Teams 未运行时 503 |
+| `GET /api/codegraph/<项目>`、`/api/codegraph/<项目>/source` | 项目的归档代码图谱及其中的源码片段；项目没有归档时 404 |
 | `POST /api/pull-requests` | 提交 PR（`{ artifactId, suggestionId?, repository, base, note, skillDirectory? }`）。每开始一步返回一行 `{ step }`（0 读取分支、1 核对文件、2 生成提交、3 创建分支、4 创建 PR），最后一行是 `{ boot }`（最新状态）或 `{ error }`；弹窗据此显示进度。同一产物或建议提交中时返回 409 |
 
 ## 演示脚本（约 10 分钟）
 
-以 Owner（林悦）身份演示；顶栏左侧的系统切换选“iCode Teams”回到 Teams 中的项目。演示前确认 `gh auth status` 已登录，并且本仓库的 `git remote` 中有自己的 fork（PR 会默认提交到 fork）。
+以 Owner（林悦）身份演示；顶栏左侧的系统切换选“iCode Teams”回到 Teams 中的项目。演示前先启动 Teams，确认 `gh auth status` 已登录，并在 Teams 的 Credit Card 项目概览中绑定业务仓工作区（PR 默认提交到它的 origin 和基线分支）。
 
-1. **项目**：点进“信用卡营销交付”，在“来源”页签介绍来自 Teams 的代码仓和文档集；打开“设计文档”，看版本记录和“检查更新”；再看“会话与 Skill”中成员共享的会话和项目 Skill。
+1. **项目**：点进“Credit Card”，在“来源”页签介绍来自 Teams 的代码仓和文档集；打开“设计文档”，看版本记录和“检查更新”；再看“会话与 Skill”中成员共享的会话和项目 Skill。
 2. **知识能力**：按四类介绍能力，说明“更新”字段：CodeGraph、文档 RAG 检索、业务知识提取在来源变化后只处理变化的部分；点开卡片，在右侧抽屉看能力的详细介绍（输入、核心能力、输出）。
    可以演示导入自定义能力：右上角“导入能力”，点“使用示例定义包：数据库结构索引”，看校验结果和能力定义后导入，再在详情中“新建任务”。
 3. **知识任务**（项目的“知识任务”页签）：“当前任务”分定时任务和一次性任务；定时任务可以暂停。“已完成”中有一条轨迹洞察任务，打开看产出和日志。运行中的任务可以取消，任务可以在详情中删除。
 4. **产物管理**（项目默认打开的页签，页签上显示待审阅的产物和待提交的建议数量）：
    - 打开“信用卡营销返现业务知识”（新版本待审阅），切到“对比”，看与上次版本 v1 的差异。
-   - 点“提交 PR”，GitHub 仓库和目标分支已按 fork 预填，提交后右侧显示“PR 已创建”和 PR 链接，由开发者在代码托管平台审阅合入。
+   - 点“提交 PR”，GitHub 仓库和目标分支已按 Teams 绑定的工作区预填，提交后右侧显示“PR 已创建”和 PR 链接，由开发者在代码托管平台审阅合入。
    - 打开“轨迹洞察：CardDemo 迁移与扩建（19 轮）”（卡片提示“3 条优化建议待提交”），先看诊断报告，再逐条看建议：
      - “统一 ADR Skill、模板与校验脚本的章节契约”：点“提交改进 PR”，修改仓内 Skill arch-adr-writing 的文件。
      - “为完成声明补充最终复验与数据变更披露要求”：点“提交改进 PR”，向仓库的 AGENTS.md 补充规则。
@@ -104,7 +109,7 @@ Talents 自己的状态（任务、产物、PR 提交记录与提交内容、诊
 
 | 路径 | 内容 |
 |---|---|
-| `server/` | 服务：`index.ts` 接口与静态页面，`teams-data.ts` 读取并映射 Teams 快照，`export.ts` 把远端索引等产物写入共享目录，`pull-requests.ts` 通过 `gh` 提交 PR，`store.ts` 状态存储，`seed.ts` 初始数据 |
+| `server/` | 服务：`index.ts` 接口与静态页面，`teams-data.ts` 向 Teams 读取并映射团队、项目和来源，`codegraph.ts` 按项目读取归档的代码图谱，`export.ts` 把远端索引等产物写入共享目录，`pull-requests.ts` 通过 `gh` 提交 PR，`store.ts` 状态存储，`seed.ts` 初始数据 |
 | `src/` | 页面（React + TypeScript + Ant Design，外壳与 iCode Teams 一致）。`pages/` 下每个文件对应一个页面；`demo/` 是演示用的模拟逻辑（任务运行、产物生成、iCode 筛选会话、产物版本与差异）；`vendor/teams/` 原样复制自 `teams/src/vendor/teams` |
 | `content/` | 产物与 Skill 的原文（业务知识、开发范式、轨迹诊断报告、配套 Skill） |
 | `dist/` | 构建出的页面（`npm run build`），服务在 `/talents/` 提供 |

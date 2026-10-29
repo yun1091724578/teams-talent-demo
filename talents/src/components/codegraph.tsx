@@ -19,7 +19,7 @@ async function get<T>(path: string, signal: AbortSignal): Promise<T> {
   return data;
 }
 
-export function CodeGraphView() {
+export function CodeGraphView({ projectId }: { projectId: string }) {
   const [graph, setGraph] = useState<GraphSnapshot>(), [failure, setFailure] = useState(''), [attempt, setAttempt] = useState(0);
   const [level, setLevel] = useState<GraphLevel>('symbol'), [service, setService] = useState('');
   const [tests, setTests] = useState(true), [crossCalls, setCrossCalls] = useState(true);
@@ -30,9 +30,9 @@ export function CodeGraphView() {
   const selectedRef = useRef(''), syncRef = useRef<() => void>(undefined); selectedRef.current = selected;
   useEffect(() => {
     const controller = new AbortController(); setFailure(''); setGraph(undefined);
-    get<GraphSnapshot>('/api/codegraph/carddemo', controller.signal).then(setGraph).catch(e => { if (!controller.signal.aborted) setFailure(e.message); });
+    get<GraphSnapshot>('/api/codegraph/' + encodeURIComponent(projectId), controller.signal).then(setGraph).catch(e => { if (!controller.signal.aborted) setFailure(e.message); });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, projectId]);
   const services = useMemo(() => [...new Set(graph?.nodes.map(n => n.service))].sort(), [graph]);
   const colors = useMemo(() => new Map(services.map((s, i) => [s, palette[i % palette.length]])), [services]);
   const options = { level, service, tests, crossCalls, kinds, relation, focus, hops };
@@ -133,7 +133,7 @@ export function CodeGraphView() {
     setSource(undefined); setSourceError('');
     if (!node || !graph) return;
     const controller = new AbortController();
-    get<Source>(`/api/codegraph/carddemo/source?id=${encodeURIComponent(node.id)}&snapshot=${graph.metadata.snapshotId}`, controller.signal)
+    get<Source>(`/api/codegraph/${encodeURIComponent(projectId)}/source?id=${encodeURIComponent(node.id)}&snapshot=${graph.metadata.snapshotId}`, controller.signal)
       .then(setSource).catch(e => { if (!controller.signal.aborted) setSourceError(e.message); });
     return () => controller.abort();
   }, [node?.id, graph?.metadata.snapshotId]);

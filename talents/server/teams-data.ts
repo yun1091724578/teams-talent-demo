@@ -1,28 +1,38 @@
-// Reads the Teams snapshot and maps it into the Talents model. Teams owns the team, members,
-// projects, code repositories, design documents and shared sessions; Talents shows them read-only
-// and keeps only its own metadata about them (TalentsState.sourceMeta).
+// Reads the team, members, projects, code repositories, design documents and shared sessions from Teams over HTTP
+// and maps them into the Talents model. Teams owns them; Talents shows them read-only and keeps only its own
+// metadata about them (TalentsState.sourceMeta). Teams must be running for them to show.
 import { readFile } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
-import { sharedPaths, type SharedProject, type SharedSession, type TeamsSnapshot } from '../../shared/contracts.ts';
-import { repositoryRoot, seedDir, sharedDir } from './config.ts';
+import { relative, resolve } from 'node:path';
+import type { SharedProject, SharedSession, SharedTeams, TeamsSnapshot } from '../../shared/contracts.ts';
+import { repositoryRoot, teamsOrigin } from './config.ts';
 import { CLIENT_OWNED_KEYS, HttpError, SOURCE_META_KEYS, type DocTreeGroup, type LocalSource, type Source, type SourceMeta, type TalentsState } from './model.ts';
 
-export type SnapshotOrigin = 'shared' | 'seed' | 'none';
-export interface TeamsData { snapshot: TeamsSnapshot; from: SnapshotOrigin }
+/** online: false when Teams could not be read; the snapshot is then an empty team. */
+export type TeamsData = { online: true; revision: string; snapshot: TeamsSnapshot } | { online: false; revision: null; snapshot: TeamsSnapshot; error: string };
+/** GETs a Teams path and returns its JSON; tests pass their own. */
+export type TeamsGet = (path: string, signal: AbortSignal) => Promise<any>;
+const teamsGet: TeamsGet = async (path, signal) => {
+  const response = await fetch(teamsOrigin + path, { signal });
+  if (!response.ok) throw new Error('iCode Teams 返回 ' + response.status);
+  return response.json();
+};
 
 const EMPTY: TeamsSnapshot = { schemaVersion: 1, exportedAt: '', team: { name: '', members: [] }, projects: [], sessions: [] };
 
-/** The snapshot Teams last exported; falls back to the committed seed copy, then to an empty team. */
-export async function readTeamsData(dirs: { shared: string; seed: string } = { shared: sharedDir, seed: seedDir }): Promise<TeamsData> {
-  for (const [from, dir] of [['shared', dirs.shared], ['seed', dirs.seed]] as const) {
-    let text: string;
-    try { text = await readFile(join(dir, sharedPaths.teamsSnapshot), 'utf8'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
-    const snapshot = JSON.parse(text) as TeamsSnapshot;
-    if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.projects) || !Array.isArray(snapshot.team?.members)) throw new HttpError('Teams 快照格式无效：' + join(dir, sharedPaths.teamsSnapshot), 502);
-    return { snapshot: { ...snapshot, sessions: snapshot.sessions ?? [] }, from };
+/** Teams' current data (GET /api/shared/teams). */
+export async function readTeamsData(get: TeamsGet = teamsGet): Promise<TeamsData> {
+  try {
+    const { revision, snapshot } = await get('/api/shared/teams', AbortSignal.timeout(5000)) as SharedTeams;
+    if (typeof revision !== 'string' || snapshot?.schemaVersion !== 1 || !Array.isArray(snapshot.projects) || !Array.isArray(snapshot.team?.members)) throw new Error('iCode Teams 数据格式无效');
+    return { online: true, revision, snapshot: { ...snapshot, sessions: snapshot.sessions ?? [] } };
+  } catch (error) {
+    return { online: false, revision: null, snapshot: EMPTY, error: '无法读取 iCode Teams 数据：' + (error as Error).message };
   }
-  return { snapshot: EMPTY, from: 'none' };
+}
+/** Waits (long polling) until Teams' revision differs from `after`, or about 25 s pass; null when Teams cannot be reached. */
+export async function teamsRevision(after: string, signal: AbortSignal, get: TeamsGet = teamsGet): Promise<string | null> {
+  try { return (await get('/api/shared/teams/changes?after=' + encodeURIComponent(after), AbortSignal.any([signal, AbortSignal.timeout(35000)]))).revision ?? null; }
+  catch { return null; }
 }
 
 // ---------- Mapping ----------
@@ -50,12 +60,13 @@ function tree(paths: string[]): DocTreeGroup[] {
   }
   return [...groups].map(([dir, files]) => ({ dir, files }));
 }
-/** Code repositories Talents can work on: those with a local clone. Remote-only repositories are not sources. */
+/** A project's code repositories. Path, origin and branch are those of the workspace bound in Teams; an unbound
+ *  repository is still listed (its knowledge keeps its source) but has no path, and no task can use it. */
 function repoSources(project: SharedProject, meta: Record<string, SourceMeta>): Source[] {
-  return project.repositories.filter(repo => repo.path).map(repo => {
+  return project.repositories.map(repo => {
     const m = meta[repo.id] ?? {};
-    return { id: repo.id, type: 'repo', name: repo.name, path: repo.path!, desc: repo.description ?? '', fromTeams: true, projectId: project.id,
-      branch: repo.branch ?? 'main', origin: m.origin ?? repo.remote ?? '', commit: m.commit ?? null, prs: m.prs ?? 0 };
+    return { id: repo.id, type: 'repo', name: repo.name, path: repo.path ?? '', bound: !!repo.path, desc: repo.description ?? '', fromTeams: true, projectId: project.id,
+      branch: repo.branch ?? 'main', origin: repo.remote ?? '', commit: m.commit ?? null, ...(m.prs === undefined ? {} : { prs: m.prs }) };
   });
 }
 /** A project's design documents become one document set named "<project>文档". */
@@ -81,27 +92,33 @@ function session(s: SharedSession, i: number) {
     files: qa ? 0 : Math.max(1, Math.round(s.turns * (0.12 + wiggle(i + 3, 0.2)))) };
 }
 
-/** Teams data in the shape the front-end uses. Read-only imported projects are hidden. */
+/** Teams data in the shape the front-end uses. Imported projects (readonly) are shown and marked. */
 export function teamsModel(snapshot: TeamsSnapshot, meta: Record<string, SourceMeta> = {}) {
   const members = snapshot.team.members;
   const owner = members.find(m => m.role === 'owner') ?? members[0];
   const me = members.find(m => m.id === 'member') ?? members.find(m => m.role === 'member') ?? owner;
-  const projects = snapshot.projects.filter(p => !p.readonly);
+  const projects = snapshot.projects;
   const sources = projects.flatMap(p => [...repoSources(p, meta), ...docSet(p, meta, snapshot.exportedAt)]);
   const visible = new Set(projects.map(p => p.id));
   return {
     team: { name: snapshot.team.name, admin: owner?.id ?? '', me: me?.id ?? '',
       members: members.map(m => ({ id: m.id, name: m.name, role: m.role, status: m.status, title: m.role === 'owner' ? 'Owner' : '成员' })) },
-    projects: projects.map(p => ({ id: p.id, name: p.name, description: p.description, skills: p.skills ?? [] })),
+    projects: projects.map(p => ({ id: p.id, name: p.name, description: p.description, readonly: p.readonly, skills: (p.skills ?? []).map(({ content, ...skill }) => skill) })),
     sources,
     sessions: snapshot.sessions.filter(s => visible.has(s.projectId)).map(session),
   };
 }
+/** The Teams-derived part of the client state: team, projects, sources (with the sessions pseudo source) and sessions. */
+export function teamsView(snapshot: TeamsSnapshot, meta: Record<string, SourceMeta> = {}) {
+  const teams = teamsModel(snapshot, meta);
+  return { team: teams.team, projects: teams.projects, sources: [SESSIONS_SOURCE, ...teams.sources], sessions: teams.sessions };
+}
 
-/** SKILL.md of a project skill, read from the path Teams gives (relative to the repository root). */
+/** SKILL.md of a project skill: the content Teams sends, else read from the path Teams gives (relative to the repository root). */
 export async function readSkill(snapshot: TeamsSnapshot, projectId: string, skillId: string, root = repositoryRoot) {
-  const skill = snapshot.projects.find(p => p.id === projectId && !p.readonly)?.skills?.find(s => s.id === skillId);
+  const skill = snapshot.projects.find(p => p.id === projectId)?.skills?.find(s => s.id === skillId);
   if (!skill) throw new HttpError('项目 Skill 不存在', 404);
+  if (skill.content !== undefined) return { ...skill, content: skill.content };
   const path = resolve(root, skill.path);
   if (relative(root, path).startsWith('..')) throw new HttpError('Skill 路径无效', 400);
   try { return { ...skill, content: await readFile(path, 'utf8') }; }
@@ -110,10 +127,9 @@ export async function readSkill(snapshot: TeamsSnapshot, projectId: string, skil
 
 /** The state the front-end works on: Talents state merged with the Teams-derived team, projects, sources and sessions. */
 export function clientState(state: TalentsState, snapshot: TeamsSnapshot) {
-  const teams = teamsModel(snapshot, state.sourceMeta);
+  const teams = teamsView(snapshot, state.sourceMeta);
   const owned = Object.fromEntries(CLIENT_OWNED_KEYS.map(key => [key, state[key]]));
-  const sources: Source[] = [SESSIONS_SOURCE, ...teams.sources, ...state.localSources];
-  return { ...owned, team: teams.team, projects: teams.projects, sources, sessions: teams.sessions };
+  return { ...owned, ...teams, sources: [...teams.sources, ...state.localSources] as Source[] };
 }
 
 /**
@@ -131,10 +147,10 @@ export function ownedState(client: Record<string, any>, previous: TalentsState):
     if (s.fromTeams) {
       const meta: SourceMeta = {};
       for (const key of SOURCE_META_KEYS) if (s[key] != null) (meta as any)[key] = s[key];
-      sourceMeta[s.id] = meta;
+      if (Object.keys(meta).length || s.id in sourceMeta) sourceMeta[s.id] = meta;
       continue;
     }
-    const { fromTeams, titles, ...rest } = s;
+    const { fromTeams, titles, bound, ...rest } = s;
     localSources.push({ ...(rest as unknown as LocalSource), type: 'docs', projectId: typeof s.projectId === 'string' ? s.projectId : null });
   }
   return { ...next, sourceMeta, localSources };

@@ -8,9 +8,14 @@ import { gzipSync } from 'node:zlib';
 import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Usage: node tools/export-codegraph.mjs [--project <Teams project id>] [--dir <repository directory>]
+// Defaults to the Credit Card project (carddemo) and the archived workspace/carddemo-java-1025.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const project = resolve(root, 'workspace/carddemo-java-1025');
-const output = resolve(root, 'talents/data/codegraph');
+const option = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
+const projectId = option('--project') ?? 'carddemo';
+if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,100}$/.test(projectId)) throw new Error('Invalid project id: ' + projectId);
+const project = resolve(root, option('--dir') ?? 'workspace/carddemo-java-1025');
+const output = resolve(root, 'talents/data/codegraph', projectId);
 const temp = mkdtempSync(resolve(tmpdir(), 'carddemo-codegraph-'));
 const databasePath = resolve(temp, 'codegraph.db');
 const live = new DatabaseSync(resolve(project, '.codegraph/codegraph.db'), { readOnly: true });
@@ -54,7 +59,7 @@ try {
   const count = list => list.reduce((a, n) => ({ ...a, [n.kind]: (a[n.kind] ?? 0) + 1 }), {});
   const sourceDigest = digest.digest('hex');
   const indexedAt = new Date(Number(db.prepare('SELECT max(indexed_at) AS t FROM files').get().t)).toISOString();
-  const metadata = { project: 'carddemo', root: relative(root, project).split(sep).join('/'), toolVersion: meta.indexed_with_version,
+  const metadata = { project: projectId, root: relative(root, project).split(sep).join('/'), toolVersion: meta.indexed_with_version,
     indexedAt, exportedAt: new Date().toISOString(), revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).trim(),
     sourceDigest, snapshotId: createHash('sha256').update(JSON.stringify([meta.indexed_with_version, meta.indexed_with_extraction_version, indexedAt, sourceDigest, nodes, edges])).digest('hex').slice(0, 16),
     files: files.length, nodes: nodes.length, edges: edges.length,

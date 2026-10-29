@@ -7,6 +7,7 @@ import { seedState } from '../server/seed.ts';
 import { readContent } from '../server/content.ts';
 import { buildExport } from '../server/export.ts';
 import { defaultTarget, knowledgeFiles, submitPullRequest, type Github } from '../server/pull-requests.ts';
+import type { SharedRepository, TeamsSnapshot } from '../../shared/contracts.ts';
 
 const target = { repository: 'example/project', base: 'main', note: 'test' };
 function fakeGithub(contents: Record<string, string> = {}, existing = false) {
@@ -80,43 +81,40 @@ test('gh failures propagate and indexes cannot be submitted', async () => {
   await assert.rejects(submitPullRequest(seedState().artifacts.find(a => a.kind === 'index')!, target, undefined, fakeGithub().gh), /远端索引/);
 });
 
-test('files go under the project directory, and a CRLF skill file keeps its line endings', async () => {
+test('files go to the repository root, and a CRLF skill file keeps its line endings', async () => {
   const a = seedState().artifacts.find(a => a.kind === 'diagnosis')!;
   const report = JSON.parse(readContent('trajectory/' + a.topic + '/report.json')!);
   const suggestion = report.suggestions.find((s: any) => s.kind === 'skill');
   const crlf = (text: string) => text.replace(/\r?\n/g, '\r\n');
-  const dir = 'workspace/.agents/skills/' + suggestion.skill + '/';
-  const skill = await submitPullRequest(a, { ...target, directory: 'workspace' }, suggestion.id,
+  const dir = '.agents/skills/' + suggestion.skill + '/';
+  const skill = await submitPullRequest(a, target, suggestion.id,
     fakeGithub(Object.fromEntries(suggestion.files.map((f: any) => [dir + f.path, crlf(f.before)]))).gh);
   assert.deepEqual(skill.files.map(f => f.path), suggestion.files.map((f: any) => dir + f.path));
   assert.deepEqual(skill.files.map(f => f.text), suggestion.files.map((f: any) => crlf(f.after)));
-  const rule = await submitPullRequest(a, { ...target, directory: 'workspace' }, 'change-03', fakeGithub().gh);
-  assert.equal(rule.files[0].path, 'workspace/AGENTS.md');
-  const knowledge = await submitPullRequest(seedState().artifacts.find(a => a.id === 'a-biz')!, { ...target, directory: 'workspace' }, undefined, fakeGithub().gh);
-  assert.ok(knowledge.files.every(f => f.path.startsWith('workspace/docs/knowledge/a-biz/')));
+  const rule = await submitPullRequest(a, target, 'change-03', fakeGithub().gh);
+  assert.equal(rule.files[0].path, 'AGENTS.md');
+  const knowledge = await submitPullRequest(seedState().artifacts.find(a => a.id === 'a-biz')!, target, undefined, fakeGithub().gh);
+  assert.ok(knowledge.files.every(f => f.path.startsWith('docs/knowledge/a-biz/')));
 });
 
-test('PRs go to a fork of the project repository among the git remotes, otherwise to the repository; always the project branch', async () => {
-  const upstream = 'zhuyuloveai/teams-talent-demo';
-  const gh: Github = async (_method, path) => path === 'repos/tester/teams-talent-demo'
-    ? { full_name: 'tester/teams-talent-demo', fork: true, parent: { full_name: upstream } }
-    : { full_name: path.slice(6), fork: path !== 'repos/' + upstream };
-  const withFork = await defaultTarget('carddemo', gh, async () => ['https://github.com/' + upstream + '.git', 'git@github.com:other/unrelated.git', 'git@github.com:tester/teams-talent-demo.git']);
-  assert.deepEqual(withFork, { repository: 'tester/teams-talent-demo', base: 'develop', fork: true, directory: 'workspace' });
-  const withoutFork = await defaultTarget('carddemo', gh, async () => ['https://github.com/' + upstream + '.git', 'https://github.com/other/unrelated']);
-  assert.deepEqual(withoutFork, { repository: upstream, base: 'develop', fork: false, directory: 'workspace' });
-  assert.deepEqual(await defaultTarget('carddemo', async () => { throw new Error('offline'); }, async () => ['git@github.com:tester/teams-talent-demo.git']),
-    { repository: upstream, base: 'develop', fork: false, directory: 'workspace' });
-  await assert.rejects(defaultTarget('unknown', gh, async () => []), /还没有关联 GitHub 仓库/);
+test('PRs go to the origin and base branch of the workspace bound to the project in Teams', () => {
+  const project = (repositories: SharedRepository[]): TeamsSnapshot => ({ schemaVersion: 1, exportedAt: '', team: { name: '', members: [] }, sessions: [],
+    projects: [{ id: 'carddemo', name: 'Credit Card', description: '', readonly: false, documents: [], skills: [], repositories }] });
+  const repo = { id: 'repository:carddemo:carddemo-java-1025', name: 'carddemo-java-1025' };
+  for (const remote of ['https://github.com/JeffyLiu003/carddemo-java-1025.git', 'git@github.com:JeffyLiu003/carddemo-java-1025.git', 'ssh://git@github.com/JeffyLiu003/carddemo-java-1025'])
+    assert.deepEqual(defaultTarget(project([{ ...repo, path: '/work/carddemo-java-1025', remote, branch: 'develop' }]), 'carddemo'), { repository: 'JeffyLiu003/carddemo-java-1025', base: 'develop' });
+  assert.throws(() => defaultTarget(project([repo]), 'carddemo'), /还没有在 iCode Teams 中绑定代码仓/);
+  assert.throws(() => defaultTarget(project([{ ...repo, path: '/work/carddemo', remote: 'https://code.bank.local/carddemo.git', branch: 'main' }]), 'carddemo'), /不在 GitHub 上/);
+  assert.throws(() => defaultTarget(project([repo]), 'unknown'), /还没有在 iCode Teams 中绑定代码仓/);
 });
 
 test('the Skill suggestion is based on the Skill in workspace/.agents/skills of this repository', async () => {
   const a = seedState().artifacts.find(a => a.kind === 'diagnosis')!;
   const report = JSON.parse(readContent('trajectory/' + a.topic + '/report.json')!);
   const suggestion = report.suggestions.find((s: any) => s.kind === 'skill');
-  const dir = 'workspace/.agents/skills/' + suggestion.skill + '/';
-  const contents = Object.fromEntries(suggestion.files.map((f: any) => [dir + f.path, readFileSync(join(repositoryRoot, dir + f.path), 'utf8')]));
-  const result = await submitPullRequest(a, { ...target, directory: 'workspace' }, suggestion.id, fakeGithub(contents).gh);
+  const dir = '.agents/skills/' + suggestion.skill + '/';
+  const contents = Object.fromEntries(suggestion.files.map((f: any) => [dir + f.path, readFileSync(join(repositoryRoot, 'workspace', dir + f.path), 'utf8')]));
+  const result = await submitPullRequest(a, target, suggestion.id, fakeGithub(contents).gh);
   assert.equal(result.files.length, suggestion.files.length);
 });
 
