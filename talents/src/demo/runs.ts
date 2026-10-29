@@ -268,7 +268,7 @@ export function produce(st: TalentsState, t: Task): Artifact | null {
   const cap = capability(st, t.cap);
   if (cap.custom && !cap.mcp) return null;
   let a = existingArtifact(st, t);
-  if (a?.id === 'a-cg-java') { t.unchanged = true; return a; }
+  if (a?.graphSnapshot) { t.unchanged = true; return a; }
   const draft: Draft = { created: now(), task: t.id, revisions: [], basis: sourceState(source(st, t.sources[0])) };
   if (a) {
     if (a.folder === 'miner') {

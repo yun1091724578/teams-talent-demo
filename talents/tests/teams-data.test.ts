@@ -1,33 +1,40 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { TeamsSnapshot } from '../../shared/contracts.ts';
+import type { SharedTeams, TeamsSnapshot } from '../../shared/contracts.ts';
 import snapshotJson from './fixtures/teams-snapshot.json' with { type: 'json' };
-import { clientState, readSkill, readTeamsData, teamsModel } from '../server/teams-data.ts';
-import seedSnapshotJson from '../../shared/seed/teams/snapshot.json' with { type: 'json' };
+import { clientState, readSkill, readTeamsData, teamsModel, teamsRevision, teamsView, type TeamsGet } from '../server/teams-data.ts';
 import { seedState, DOCSET_ID, REPO_ID, STD_ID } from '../server/seed.ts';
+// The snapshot Teams serves, built by Teams itself, so a field Teams stops sending fails here.
+import { readFixtures } from '../../teams/server/http-shared.js';
+import { teamsSnapshot } from '../../teams/server/shared-data.js';
+import { initialState } from '../../teams/src/domain.js';
+import { createSourcePluginCatalog } from '../../teams/src/source-plugins.js';
+import type { ProjectWorkspaces } from '../../teams/src/project-workspace.js';
 
 const snapshot = snapshotJson as TeamsSnapshot;
+const fixtures = await readFixtures();
+const unbound: ProjectWorkspaces = { version: 1, defaultProjectId: null, projects: [] };
+const bound: ProjectWorkspaces = { version: 1, defaultProjectId: 'carddemo', projects: [
+  { projectId: 'carddemo', directory: '/work/carddemo-java-1025', remoteUrl: 'https://github.com/JeffyLiu003/carddemo-java-1025.git', baseBranch: 'develop', commonDirectory: '/work/carddemo-java-1025/.git' }] };
+const fromTeams = (workspaces: ProjectWorkspaces) => teamsSnapshot(initialState(), fixtures, createSourcePluginCatalog(fixtures), workspaces);
 
-test('hides the read-only imported Teams project and keeps user-created ones', () => {
+test('shows the imported iCode Teams project, marked read-only, next to the others', () => {
   const model = teamsModel(snapshot);
-  assert.deepEqual(model.projects.map(p => p.id), ['carddemo', 'project-1a2b3c']);
-  assert.ok(!model.sources.some(s => s.projectId === 'teams'));
+  assert.deepEqual(model.projects.map(p => [p.id, p.readonly]), [['carddemo', false], ['teams', true], ['project-1a2b3c', false]]);
+  assert.ok(model.sources.some(s => s.projectId === 'teams' && s.type === 'docs'));
 });
 
-test('a user-created project has no local repository or documents, so it shows empty', () => {
+test('an unbound repository is listed without a path; a bound one has its workspace path', () => {
   const model = teamsModel(snapshot);
-  assert.ok(model.projects.some(p => p.id === 'project-1a2b3c'));
-  assert.deepEqual(model.sources.filter(s => s.projectId === 'project-1a2b3c'), []);
+  const created = model.sources.filter(s => s.projectId === 'project-1a2b3c');
+  assert.deepEqual(created.map(s => [s.type, s.path, s.bound]), [['repo', '', false]]);
+  const repo = model.sources.find(s => s.id === REPO_ID)!;
+  assert.deepEqual([repo.name, repo.path, repo.bound], ['carddemo-java-1025', 'workspace/carddemo-java-1025', true]);
 });
 
 test('maps the project documents into one document set named after the project', () => {
   const model = teamsModel(snapshot);
-  const docs = model.sources.filter(s => s.type === 'docs');
-  assert.equal(docs.length, 1);
-  const set = docs[0];
+  const set = model.sources.find(s => s.type === 'docs' && s.projectId === 'carddemo')!;
   assert.equal(set.id, DOCSET_ID);
   assert.equal(set.name, '设计文档');
   assert.equal(set.path, 'iCode Teams 已对接的 3 份设计文档');
@@ -35,9 +42,6 @@ test('maps the project documents into one document set named after the project',
   assert.deepEqual(set.tree, [{ dir: 'teams/docs', files: ['cashback-contract.md'] }, { dir: 'workspace/carddemo-java-1025/docs/design/adr', files: ['ADR-009-marketing-integration.md', 'ADR-007-authentication-scope.md'] }]);
   assert.equal(set.titles!['teams/docs/cashback-contract.md'], '消费返现规则');
   assert.equal(set.fromTeams, true);
-  const repo = model.sources.find(s => s.type === 'repo')!;
-  assert.equal(repo.id, REPO_ID);
-  assert.equal(repo.name, 'carddemo-java-1025');
   assert.deepEqual(model.sources.filter(s => s.projectId === 'carddemo').map(s => s.id), [REPO_ID, DOCSET_ID]);
 });
 
@@ -72,31 +76,54 @@ test('client state merges Talents metadata into Teams sources and adds the team-
   assert.equal(state.sources.find(s => s.id === STD_ID)!.projectId, null);
   assert.ok(state.sources.some(s => s.id === 's-sessions'));
   assert.ok(!('localSources' in state) && !('sourceMeta' in state));
+  // The Teams part the page refreshes is the same as in the full state.
+  const view = teamsView(snapshot, seedState().sourceMeta);
+  assert.deepEqual(state.sources.filter(s => s.fromTeams || s.type === 'sessions'), view.sources);
+  assert.deepEqual([state.team, state.projects, state.sessions], [view.team, view.projects, view.sessions]);
 });
 
-test('reads the shared snapshot, then the seed copy, then an empty team', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'talents-teams-'));
-  const shared = join(base, 'data'), seed = join(base, 'seed');
-  assert.equal((await readTeamsData({ shared, seed })).from, 'none');
-  await mkdir(join(seed, 'teams'), { recursive: true });
-  await writeFile(join(seed, 'teams', 'snapshot.json'), JSON.stringify(snapshot));
-  assert.equal((await readTeamsData({ shared, seed })).from, 'seed');
-  await mkdir(join(shared, 'teams'), { recursive: true });
-  await writeFile(join(shared, 'teams', 'snapshot.json'), JSON.stringify({ ...snapshot, team: { ...snapshot.team, name: '新团队' } }));
-  const read = await readTeamsData({ shared, seed });
-  assert.equal(read.from, 'shared');
-  assert.equal(read.snapshot.team.name, '新团队');
+test('reads Teams over HTTP; while Teams cannot be read the team is empty and the reason is given', async () => {
+  const served: SharedTeams = { revision: 'a1.3', snapshot };
+  const online = await readTeamsData(async path => { assert.equal(path, '/api/shared/teams'); return served; });
+  assert.deepEqual([online.online, online.revision, online.snapshot.team.name], [true, 'a1.3', '信用卡研发团队']);
+  const offline = await readTeamsData(async () => { throw new TypeError('fetch failed'); });
+  assert.equal(offline.online, false);
+  assert.deepEqual([offline.snapshot.projects, offline.snapshot.team.members], [[], []]);
+  assert.match(!offline.online ? offline.error : '', /无法读取 iCode Teams 数据：fetch failed/);
+  const invalid = await readTeamsData(async () => ({ revision: 'a1.3', snapshot: { schemaVersion: 2 } }));
+  assert.match(!invalid.online ? invalid.error : '', /格式无效/);
 });
 
-test('project skills come from Teams, and their SKILL.md is read from the repository', async () => {
-  const seed = seedSnapshotJson as TeamsSnapshot;
-  const skills = teamsModel(seed).projects.find(p => p.id === 'carddemo')!.skills;
-  assert.equal(skills.length, 13);
-  const adr = skills.find(s => s.id === 'arch-adr-writing')!;
+test('waits on Teams for a newer revision, and gives null when Teams cannot be reached', async () => {
+  let asked = '';
+  const get: TeamsGet = async path => { asked = path; return { revision: 'a1.4' }; };
+  assert.equal(await teamsRevision('a1.3', new AbortController().signal, get), 'a1.4');
+  assert.equal(asked, '/api/shared/teams/changes?after=a1.3');
+  assert.equal(await teamsRevision('a1.3', new AbortController().signal, async () => { throw new Error('ECONNREFUSED'); }), null);
+});
+
+test('what Teams serves maps one to one: projects, documents with AGENTS.md, skills and the bound workspace', async () => {
+  const served = fromTeams(bound), model = teamsModel(served);
+  assert.deepEqual(model.projects.map(p => [p.id, p.name, p.readonly, p.skills.length]), [['carddemo', 'Credit Card', false, 13], ['teams', 'iCode Teams', true, 3]]);
+  assert.deepEqual(model.projects.map(p => p.id), served.projects.map(p => p.id));
+  for (const p of served.projects) {
+    const docs = model.sources.find(s => s.type === 'docs' && s.projectId === p.id)!;
+    assert.deepEqual(Object.keys(docs.titles!), p.documents.map(d => d.path));
+  }
+  assert.equal(model.sources.find(s => s.type === 'docs' && s.projectId === 'teams')!.titles!['AGENTS.md'], '项目规范 AGENTS.md');
+  // Named as Teams lists them under 项目资料与资产.
+  assert.deepEqual(Object.values(model.sources.find(s => s.id === DOCSET_ID)!.titles!), ['营销能力设计', '营销集成与入账边界', '鉴权范围设计决策']);
+  // The bound workspace gives the repository its path, origin and branch; the id does not change.
+  const repo = model.sources.find(s => s.id === REPO_ID)!;
+  assert.deepEqual([repo.path, repo.bound, repo.origin, repo.branch], ['/work/carddemo-java-1025', true, 'https://github.com/JeffyLiu003/carddemo-java-1025.git', 'develop']);
+  const before = teamsModel(fromTeams(unbound)).sources.find(s => s.id === REPO_ID)!;
+  assert.deepEqual([before.path, before.bound], ['', false]);
+  // SKILL.md: read from this repository for the card project, sent as content for the imported project.
+  const adr = await readSkill(served, 'carddemo', 'arch-adr-writing');
   assert.equal(adr.path, 'workspace/.agents/skills/arch-adr-writing/SKILL.md');
-  const read = await readSkill(seed, 'carddemo', 'arch-adr-writing');
-  assert.match(read.content, /\| version \| 1\.0\.0 \|/);
-  await assert.rejects(readSkill(seed, 'carddemo', 'unknown'), (e: any) => e.status === 404);
-  // An older snapshot without skills gives projects none.
-  assert.deepEqual(teamsModel(snapshot).projects[0].skills, []);
+  assert.match(adr.content, /\| version \| 1\.0\.0 \|/);
+  const control = await readSkill(served, 'teams', 'icode-teams-control');
+  assert.equal(control.content, fixtures.teamsProject.documents.find((d: { path: string }) => d.path === '.agents/skills/icode-teams-control/SKILL.md')!.content);
+  assert.ok(!('content' in model.projects.find(p => p.id === 'teams')!.skills[0]), 'the page reads SKILL.md on demand');
+  await assert.rejects(readSkill(served, 'carddemo', 'unknown'), (e: any) => e.status === 404);
 });

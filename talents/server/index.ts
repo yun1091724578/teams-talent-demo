@@ -1,16 +1,16 @@
 // iCode Talents demo service: serves the static front-end at /talents, keeps Talents-owned state,
-// reads Teams data from the shared data directory and publishes knowledge back to it.
+// reads Teams data from the running Teams service and publishes knowledge to the shared data directory.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { root, port, origin, teamsOrigin, runtimeDir, sharedDir, publicDir, localConfiguration } from './config.ts';
 import { Store } from './store.ts';
 import { HttpError } from './model.ts';
-import { clientState, ownedState, readSkill, readTeamsData } from './teams-data.ts';
+import { clientState, ownedState, readSkill, readTeamsData, teamsRevision, teamsView, type TeamsData } from './teams-data.ts';
 import { KnowledgeExporter } from './export.ts';
 import { readContent } from './content.ts';
 import { codegraphSnapshot, withCodegraph, withoutCodegraph } from './codegraph.ts';
-import { defaultTarget, projectRepositories, submitPullRequest } from './pull-requests.ts';
+import { defaultTarget, submitPullRequest } from './pull-requests.ts';
 
 const store = new Store(); await store.init();
 const submissions = new Set<string>();
@@ -18,13 +18,29 @@ const exporter = new KnowledgeExporter(sharedDir);
 await exporter.export(store.state, true);
 const exportKnowledge = () => exporter.export(store.state).catch(error => console.error('Talents 知识导出失败：' + error.message));
 
+/** Whether Teams was read, its revision, and why not when it was not (src/types.ts TeamsInfo). */
+const teamsInfo = (teams: TeamsData) => ({ origin: teamsOrigin, online: teams.online, revision: teams.revision, error: teams.online ? undefined : teams.error });
 async function bootstrap() {
   const teams = await readTeamsData();
-  return {
-    revision: store.state.revision,
-    state: clientState(withCodegraph(store.state), teams.snapshot),
-    teams: { origin: teamsOrigin, from: teams.from, exportedAt: teams.snapshot.exportedAt },
-  };
+  return { revision: store.state.revision, state: clientState(withCodegraph(store.state), teams.snapshot), teams: teamsInfo(teams) };
+}
+/** Teams data an action needs; fails while Teams cannot be read. */
+async function onlineTeams() {
+  const teams = await readTeamsData();
+  if (!teams.online) throw new HttpError(teams.error, 503);
+  return teams.snapshot;
+}
+/** The Teams part of the page state. With ?after=<revision> it first waits until Teams' data changes (long polling,
+ *  about 25 s at most) and answers { changed: false } if it has not. */
+async function teamsUpdate(after: string | null, response: ServerResponse) {
+  if (after !== null) {
+    // The response closes early when the page goes away; the wait on Teams then stops too.
+    const closed = new AbortController(); response.once('close', () => closed.abort());
+    const revision = await teamsRevision(after, closed.signal);
+    if (revision === after) return { changed: false, teams: { origin: teamsOrigin, online: true, revision } };
+  }
+  const teams = await readTeamsData();
+  return { changed: true, teams: teamsInfo(teams), data: teamsView(teams.snapshot, store.state.sourceMeta) };
 }
 
 async function bodyJson(request: IncomingMessage) {
@@ -60,19 +76,19 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       }
       if (method === 'GET' && path === '/api/health') { json(200, { app: 'talents-carddemo', service: 'talents', workspaceRoot: root, stateRoot: runtimeDir, sharedDir, version: '0.1.0', pid: process.pid, origin, teamsOrigin }); return; }
       if (method === 'GET' && path === '/api/bootstrap') { json(200, await bootstrap()); return; }
+      if (method === 'GET' && path === '/api/teams') { json(200, await teamsUpdate(url.searchParams.get('after'), response)); return; }
       // Content files too large to bundle into the page, e.g. a trajectory diagnosis report (see tools/bundle-content.mjs).
       if (method === 'GET' && path === '/api/content') {
         const key = url.searchParams.get('key') ?? '', text = readContent(key);
         if (text == null) throw new HttpError('内容不存在', 404);
         response.writeHead(200, { 'Content-Type': (TYPES[extname(key)] ?? 'text/plain') + '; charset=utf-8', 'Cache-Control': 'no-cache' }); response.end(text); return;
       }
-      if (method === 'GET' && path === '/api/skill') { json(200, await readSkill((await readTeamsData()).snapshot, url.searchParams.get('project') ?? '', url.searchParams.get('id') ?? '')); return; }
-      if (method === 'GET' && path === '/api/codegraph/carddemo') {
-        const { sources, ...graph } = codegraphSnapshot();
-        json(200, graph); return;
-      }
-      if (method === 'GET' && path === '/api/codegraph/carddemo/source') {
-        const graph = codegraphSnapshot();
+      if (method === 'GET' && path === '/api/skill') { json(200, await readSkill(await onlineTeams(), url.searchParams.get('project') ?? '', url.searchParams.get('id') ?? '')); return; }
+      const codegraph = /^\/api\/codegraph\/([^/]+)(\/source)?$/.exec(path);
+      if (method === 'GET' && codegraph) {
+        const graph = codegraphSnapshot(decodeURIComponent(codegraph[1]));
+        if (!graph) throw new HttpError('该项目暂无代码图谱快照', 404);
+        if (!codegraph[2]) { const { sources, ...rest } = graph; json(200, rest); return; }
         if (url.searchParams.get('snapshot') !== graph.metadata.snapshotId) throw new HttpError('图谱已更新，请刷新后重试', 409);
         const node = graph.nodes.find(n => n.id === url.searchParams.get('id'));
         if (!node) throw new HttpError('符号不存在', 404);
@@ -93,7 +109,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         await exportKnowledge();
         json(200, await bootstrap()); return;
       }
-      if (method === 'GET' && path === '/api/pull-requests/target') { json(200, await defaultTarget(url.searchParams.get('project'))); return; }
+      if (method === 'GET' && path === '/api/pull-requests/target') { json(200, defaultTarget(await onlineTeams(), url.searchParams.get('project'))); return; }
       if (method === 'POST' && path === '/api/pull-requests') {
         const body = await bodyJson(request);
         const key = body.artifactId + '/' + (body.suggestionId ?? '');
@@ -107,7 +123,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         const send = (value: unknown) => response.write(JSON.stringify(value) + '\n');
         submissions.add(key);
         try {
-          const submitted = await submitPullRequest(structuredClone(artifact), { repository: body.repository, base: body.base, note: body.note, skillDirectory: body.skillDirectory, directory: artifact.projectId ? projectRepositories[artifact.projectId]?.directory : undefined }, body.suggestionId, undefined, step => send({ step }));
+          const submitted = await submitPullRequest(structuredClone(artifact), { repository: body.repository, base: body.base, note: body.note, skillDirectory: body.skillDirectory }, body.suggestionId, undefined, step => send({ step }));
           await store.mutate(null, previous => {
             const next = structuredClone(previous), a = next.artifacts.find(a => a.id === body.artifactId)!;
             if (body.suggestionId) {

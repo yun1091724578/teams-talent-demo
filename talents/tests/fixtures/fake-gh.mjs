@@ -6,13 +6,11 @@ const text = readFileSync(0, 'utf8'), body = text ? JSON.parse(text) : undefined
 appendFileSync(process.env.TEST_GH_LOG, JSON.stringify({ method, path, body }) + '\n');
 const report = JSON.parse(readFileSync('content/trajectory/carddemo-19/report.json', 'utf8'));
 const skill = report.suggestions.find(s => s.kind === 'skill');
-const files = Object.fromEntries(skill.files.map(f => ['workspace/.agents/skills/' + skill.skill + '/' + f.path, f.before.replace(/\n/g, '\r\n')]));
-files['workspace/AGENTS.md'] = '# Existing project rules\n';
+const files = Object.fromEntries(skill.files.map(f => ['.agents/skills/' + skill.skill + '/' + f.path, f.before.replace(/\n/g, '\r\n')]));
+files['AGENTS.md'] = '# Existing project rules\n';
 let result = { sha: 'test-generated' };
 const fail = message => { process.stderr.write('gh: ' + message); process.exit(1); };
-// The repository itself: anything but the project repository is a fork of it.
-if (method === 'GET' && /^repos\/[^/]+\/[^/]+$/.test(path)) result = { full_name: path.slice(6), fork: path !== 'repos/zhuyuloveai/teams-talent-demo', parent: { full_name: 'zhuyuloveai/teams-talent-demo' } };
-else if (path.endsWith('/git/ref/heads/develop')) result = { object: { sha: 'test-base' } };
+if (path.endsWith('/git/ref/heads/develop')) result = { object: { sha: 'test-base' } };
 else if (path.endsWith('/git/commits/test-base')) result = { sha: 'test-base', tree: { sha: 'test-tree' } };
 else if (path.includes('/contents/')) {
   const file = decodeURIComponent(path.split('/contents/')[1].split('?')[0]);

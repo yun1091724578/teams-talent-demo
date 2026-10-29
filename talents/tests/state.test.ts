@@ -26,7 +26,7 @@ test('saving strips Teams-derived team, projects, sessions and source fields', (
   });
   for (const key of ['team', 'projects', 'sessions', 'sources', 'teams']) assert.ok(!(key in saved), key + ' should not be stored');
   assert.deepEqual(Object.keys(saved.sourceMeta[DOCSET_ID]).sort(), ['lastCheck', 'versions']);
-  assert.deepEqual(Object.keys(saved.sourceMeta[REPO_ID]).sort(), ['commit', 'origin', 'prs']);
+  assert.deepEqual(Object.keys(saved.sourceMeta[REPO_ID]).sort(), ['commit', 'prs']);
   assert.deepEqual(saved.localSources.map(s => s.id), ['s-std']);
 });
 

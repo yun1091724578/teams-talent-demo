@@ -10,12 +10,15 @@ export interface Member { id: string; name: string; role: 'owner' | 'member'; st
 export interface Team { name: string; admin: string; me: string; members: Member[] }
 /** A project skill from Teams (项目可用 Skill); its SKILL.md is read on demand (api.getSkill). */
 export interface ProjectSkill { id: string; name: string; version: string; description: string; path: string; sha256: string }
-export interface Project { id: string; name: string; description?: string; skills: ProjectSkill[] }
+/** readonly: imported into Teams from another instance and browsed there as a record (iCode Teams). */
+export interface Project { id: string; name: string; description?: string; readonly?: boolean; skills: ProjectSkill[] }
 
 export interface Source {
   id: string; type: 'repo' | 'docs' | 'sessions'; name: string; path: string; desc?: string;
   /** The project the source belongs to; null for a team-level source. The sessions pseudo source has none. */
   fromTeams?: boolean; projectId?: string | null; auto?: boolean;
+  /** A repository whose workspace is bound in the Teams project overview; only bound repositories have a path and can be used. */
+  bound?: boolean;
   branch?: string; origin?: string; commit?: Commit | null; prs?: number;
   files?: number; tree?: DocTreeGroup[]; titles?: Record<string, string>;
   from?: { kind: 'teams' | 'git' | 'shared'; project?: string; origin?: string; branch?: string };
@@ -78,6 +81,8 @@ export interface Artifact {
   id: string; projectId: string | null; cap: string; name: string; desc: string; sources: string[]; kind: 'index' | 'files' | 'diagnosis';
   files?: string[]; specs?: string[]; stats?: [string, string][]; folder?: string; skills?: string[]; usage?: string; mcpName?: string;
   sessions?: string[]; topic?: string;
+  /** The archived CodeGraph snapshot this code graph shows (server/codegraph.ts); set by the service, never saved. */
+  graphSnapshot?: string;
   /** A diagnosis: how each suggestion of the report (content/trajectory/<topic>/report.json) was handled. */
   suggestions?: SuggestionState[];
   /** A project's AGENTS.md rules: each applied suggestion adds a rule and publishes the next version. */
@@ -107,4 +112,7 @@ export interface TalentsState {
   team: Team; projects: Project[]; sources: Source[]; sessions: Session[];
 }
 
-export interface TeamsInfo { origin: string; from: 'shared' | 'seed' | 'none'; exportedAt: string }
+/** Whether Teams could be read (server/index.ts teamsInfo); revision identifies the Teams data the page shows. */
+export interface TeamsInfo { origin: string; online: boolean; revision: string | null; error?: string }
+/** The Teams-derived part of the state (server/teams-data.ts teamsView). */
+export type TeamsPart = Pick<TalentsState, 'team' | 'projects' | 'sources' | 'sessions'>;

@@ -27,9 +27,8 @@ const content: Record<string, () => ReactNode> = {
 };
 
 function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): void }) {
-  const { state: st, teams, route, role, go, toast, teamsLink } = useTalents();
+  const { state: st, teams, route, role, go, teamsLink } = useTalents();
   const [width, setWidth] = useState(200); // the Teams sidebar default
-  useEffect(() => { if (teams.from === 'none') toast('还没有读取到 iCode Teams 的数据，请先启动 Teams'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const person = (r: Role) => member(st, r === 'admin' ? st.team.admin : st.team.me)?.name ?? '未读取到 Teams 成员';
   const page = route.page, Page = content[page.id];
   // The level shown (a project, or the team) and the artifact open in its review tab.
@@ -59,6 +58,8 @@ function Shell({ mode, onToggleTheme }: { mode: UiThemeMode; onToggleTheme(): vo
             <Tooltip title="总体规划"><Button variant="text" color={page.id === 'overview' ? 'primary' : 'default'} size="small" aria-label="总体规划" icon={<ReadOutlined />} onClick={() => go('#/overview')} /></Tooltip>
           </div>
         </header>
+        {!teams.online && <Alert type="warning" banner showIcon title="未连接 iCode Teams"
+          description={(st.projects.length ? '项目、成员和来源显示的是最近一次读取的数据' : '读取不到团队、项目和来源') + '，Talents 的任务和产物可以照常查看。请启动 iCode Teams，连接后自动更新。'} />}
         <div className={'page-scroll' + (opened ? ' workbench-scroll' : '')} key={page.id + (focus?.id ?? '')}><Page /></div>
       </main>
     </div>

@@ -1,11 +1,11 @@
-// The page state, its saving, hash routing and the simulated task clock.
+// The page state, its saving, keeping the Teams part current, hash routing and the simulated task clock.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { App } from 'antd';
-import { ApiError, resetState, saveState, submitPullRequest, type Boot, type SubmitRequest } from './api.ts';
+import { ApiError, resetState, saveState, submitPullRequest, teamsUpdate, type Boot, type SubmitRequest } from './api.ts';
 import { home, parseHash, type Route } from './navigation.ts';
 import { project, taskName } from './demo/model.ts';
 import { finishRun, runProgress } from './demo/runs.ts';
-import type { Role, TalentsState, TeamsInfo } from './types.ts';
+import type { Role, Source, TalentsState, TeamsInfo, TeamsPart } from './types.ts';
 
 export interface Talents {
   state: TalentsState; teams: TeamsInfo; route: Route; role: Role;
@@ -27,6 +27,20 @@ export interface Talents {
 const Context = createContext<Talents | null>(null);
 export function useTalents() { const value = useContext(Context); if (!value) throw new Error('Talents context missing'); return value; }
 
+/** Talents' own fields on a Teams source (server/model.ts SOURCE_META_KEYS). */
+const SOURCE_META_KEYS = ['commit', 'prs', 'lastCheck', 'versions'] as const;
+/** The state with a newer Teams part. Talents' metadata on Teams sources keeps what the page holds, which may not be saved yet. */
+function withTeams(state: TalentsState, part: TeamsPart): TalentsState {
+  const held = new Map(state.sources.filter(s => s.fromTeams).map(s => [s.id, s]));
+  const sources = part.sources.map(s => {
+    const h = held.get(s.id), next: Source = { ...s };
+    if (h) for (const key of SOURCE_META_KEYS) if (h[key] !== undefined) (next as any)[key] = h[key];
+    return next;
+  });
+  return { ...state, team: part.team, projects: part.projects, sessions: part.sessions,
+    sources: [...sources, ...state.sources.filter(s => !s.fromTeams && s.type !== 'sessions')] };
+}
+
 function routeOf(state: TalentsState, hash: string): Route {
   const { page, params } = parseHash(hash);
   return page ? { page, params } : { page: parseHash('#/' + home[state.role]).page!, params: {} };
@@ -35,7 +49,7 @@ function routeOf(state: TalentsState, hash: string): Route {
 export function TalentsProvider({ boot, children }: { boot: Boot; children: ReactNode }) {
   const { message } = App.useApp();
   const [state, setState] = useState(boot.state), stateRef = useRef(boot.state);
-  const [teams, setTeams] = useState(boot.teams);
+  const [teams, setTeams] = useState(boot.teams), teamsRef = useRef(boot.teams);
   const [route, setRoute] = useState(() => routeOf(boot.state, location.hash));
   const [focusProject, setFocusProject] = useState<string | null>(null);
   const [clock, setClock] = useState(Date.now());
@@ -70,13 +84,40 @@ export function TalentsProvider({ boot, children }: { boot: Boot; children: Reac
     await saver.current.saving;
     const fresh = await resetState();
     saver.current.revision = fresh.revision;
-    stateRef.current = fresh.state; setState(fresh.state); setTeams(fresh.teams);
+    stateRef.current = fresh.state; setState(fresh.state); teamsRef.current = fresh.teams; setTeams(fresh.teams);
   }, []);
   const submit = useCallback(async (request: SubmitRequest, onStep: (step: number) => void) => {
     await saver.current.saving;
     const fresh = await submitPullRequest(request, onStep);
     saver.current.revision = fresh.revision;
     stateRef.current = fresh.state; setState(fresh.state);
+  }, []);
+
+  // Teams data: the page waits on the service for Teams' revision to change (long polling) and checks again as soon as it
+  // is shown or focused. While Teams cannot be read, the page keeps the Teams data it last read and checks every 5 s.
+  useEffect(() => {
+    let current: AbortController | null = null, timer: ReturnType<typeof setTimeout> | undefined;
+    const check = async (wait: boolean) => {
+      current?.abort(); clearTimeout(timer);
+      const mine = current = new AbortController(), known = teamsRef.current;
+      try {
+        const update = await teamsUpdate(wait && known.online ? known.revision : null, mine.signal);
+        if (mine.signal.aborted) return;
+        const info = update.teams;
+        if (update.changed && info.online && info.revision !== known.revision) {
+          const next = withTeams(stateRef.current, update.data);
+          stateRef.current = next; setState(next);
+        }
+        if (info.online !== known.online || info.revision !== known.revision || info.error !== known.error) { teamsRef.current = info; setTeams(info); }
+        if (info.online) void check(true); else timer = setTimeout(() => void check(false), 5000);
+      } catch {
+        if (!mine.signal.aborted) timer = setTimeout(() => void check(false), 5000);
+      }
+    };
+    const shown = () => { if (document.visibilityState === 'visible') void check(false); };
+    void check(true);
+    window.addEventListener('focus', shown); document.addEventListener('visibilitychange', shown);
+    return () => { current?.abort(); clearTimeout(timer); window.removeEventListener('focus', shown); document.removeEventListener('visibilitychange', shown); };
   }, []);
 
   // Routing: hash changes and go() both parse the hash, so a role switch and its page change render together.

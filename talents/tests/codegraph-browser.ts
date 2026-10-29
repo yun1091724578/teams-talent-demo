@@ -4,9 +4,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { fakeTeams } from './fixtures/fake-teams.ts';
 
 const port = 45988, origin = `http://127.0.0.1:${port}`;
 const directory = await mkdtemp(join(tmpdir(), 'codegraph-browser-'));
+const teams = await fakeTeams(45979);
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
   env: { ...process.env, DEMO_TALENT_PORT: String(port), DEMO_PORT: '45979', DEMO_TALENT_STATE_DIR: join(directory, 'state'), DEMO_SHARED_DIR: join(directory, 'shared') },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -28,6 +30,7 @@ try {
   const sourceURL = origin + '/api/codegraph/carddemo/source';
   assert.equal((await fetch(sourceURL + '?snapshot=stale&id=' + graph.nodes[0].id)).status, 409);
   assert.equal((await fetch(sourceURL + '?snapshot=' + graph.metadata.snapshotId + '&id=../../etc/passwd')).status, 404);
+  assert.equal((await fetch(origin + '/api/codegraph/teams')).status, 404, 'a project without an archive has no graph');
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors: string[] = [];
@@ -58,7 +61,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('CodeGraph API, graph navigation, archived source, mobile layout passed');
 } finally {
-  await browser?.close(); server.kill('SIGTERM');
+  await browser?.close(); server.kill('SIGTERM'); teams.close();
   await stopped;
   await rm(directory, { recursive: true, force: true });
 }

@@ -5,8 +5,8 @@ export interface Commit { sha: string; message: string; time: string }
 /** A document-set version: recorded when a check finds changed files, named by that check's time. */
 export interface DocVersion { at: string; initial?: number; files?: string[]; added?: string[]; modified?: string[]; removed?: string[] }
 /** Talents' own metadata about a source that Teams owns (keyed by the Teams-derived source id). */
-export interface SourceMeta { origin?: string; commit?: Commit; prs?: number; lastCheck?: string; versions?: DocVersion[] }
-export const SOURCE_META_KEYS = ['origin', 'commit', 'prs', 'lastCheck', 'versions'] as const;
+export interface SourceMeta { commit?: Commit; prs?: number; lastCheck?: string; versions?: DocVersion[] }
+export const SOURCE_META_KEYS = ['commit', 'prs', 'lastCheck', 'versions'] as const;
 
 export interface DocTreeGroup { dir: string; files: string[] }
 /** A local document directory registered in Talents (the only source Talents owns). */
@@ -21,6 +21,8 @@ export interface LocalSource {
 export interface Source {
   id: string; type: 'repo' | 'docs' | 'sessions'; name: string; path: string; desc?: string;
   fromTeams?: boolean; projectId?: string | null;
+  /** A repository whose workspace is bound in Teams (it then has a path). */
+  bound?: boolean;
   branch?: string; origin?: string; commit?: Commit | null; prs?: number;
   files?: number; tree?: DocTreeGroup[]; titles?: Record<string, string>; from?: { kind: string; [key: string]: unknown };
   lastCheck?: string; versions?: DocVersion[]; auto?: boolean;

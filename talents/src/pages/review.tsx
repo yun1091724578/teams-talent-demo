@@ -18,8 +18,8 @@ import type { Toolbar } from './level.tsx';
 // ---------- List ----------
 /** Published knowledge whose source changed after it was built; the capability must be able to update. */
 function staleChanges(st: TalentsState, a: Artifact) {
-  // The demo graph is a committed snapshot shown independently of workspace changes.
-  if (a.id === 'a-cg-java') return null;
+  // An archived code graph is a committed snapshot shown independently of repository changes.
+  if (a.graphSnapshot) return null;
   if (a.draft || !capability(st, a.cap).update) return null;
   const c = changesSince(source(st, a.sources[0]), basisOf(a));
   return c && c.count ? c : null;

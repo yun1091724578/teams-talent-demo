@@ -45,7 +45,7 @@
   "projects": [
     {
       "id": "carddemo",
-      "name": "信用卡营销交付",
+      "name": "Credit Card",
       "description": "针对白金卡客户未来 3 个月的消费，额外增加 0.5% 的消费返现。",
       "readonly": false,
       "repositories": [
