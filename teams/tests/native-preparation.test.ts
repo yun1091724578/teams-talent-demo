@@ -59,16 +59,20 @@ test('prepared work remains task/assignee bound, idempotent and resumes only the
   if(one.status!=='ready')throw new Error('expected ready');preparation.status='ready';preparation.session=one;state.workspace.taskAutomation!.find(record=>record.taskId===scope.taskId)!.knowledge!.status='ready';
   const denied=await service.plan('member',{...scope,tab:'delivery',nodeId:'prepare'});assert.equal(denied.defaultAction,'resume');assert.equal(denied.actions[0].enabled,false);
   task.assigneeId='member';preparation.assigneeId='member';
-  const plan=await service.plan('member',{...scope,tab:'delivery',nodeId:'prepare'});assert.deepEqual(plan.actions.map(action=>action.id),['resume']);assert.equal(plan.actions[0].enabled,true);assert.equal(plan.history!.sessionId,one.sessionId);
+  const plan=await service.plan('member',{...scope,tab:'delivery',nodeId:'prepare'});assert.deepEqual(plan.actions.map(action=>action.id),['resume','new']);assert.equal(plan.actions[0].enabled,true);assert.equal(plan.defaultAction,'resume');assert.equal(plan.history!.sessionId,one.sessionId);
   const downstream=await service.plan('member',{...plan.target,nodeId:'develop'});assert.equal(downstream.actions[0].enabled,false);assert.match(downstream.actions[0].reason!,/上游交付物/);assert.equal(downstream.history!.sessionId,one.sessionId);
   const request={requestId:randomUUID(),target:plan.target,action:'resume' as const,planToken:plan.planToken};await service.start('member',request);await service.start('member',request);assert.equal(starts.length,1);assert.equal(starts[0].sessionId,one.sessionId);assert.equal(starts[0].task.preparedSession.sourceRunId,one.runId);assert.equal(starts[0].terminal,'ghostty');
+  const fresh=await service.start('member',{requestId:randomUUID(),target:plan.target,action:'new',planToken:plan.planToken});assert.equal(fresh.action,'new');assert.equal(fresh.sessionId,null);assert.equal(starts.length,2);assert.equal(starts[1].sessionId,undefined);assert.equal(starts[1].task.preparedSession,undefined);
+  await mkdir(join(dir,'work-contexts',one.runId+'.native','session-root','sessions',one.sessionId.replaceAll('-','').slice(0,12),'trajectory'),{recursive:true});
+  await writeFile(join(dir,'work-contexts',one.runId+'.native','session-root','sessions',one.sessionId.replaceAll('-','').slice(0,12),'trajectory','events.jsonl'),'{bad}\n');
+  const degradedPlan=await service.plan('member',plan.target);assert.equal(degradedPlan.history!.trajectory?.state,'degraded');assert.equal(degradedPlan.history!.trajectory?.reason,'corrupt_tail');assert.deepEqual(degradedPlan.actions.map(action=>action.id),['resume','new']);assert.equal(degradedPlan.defaultAction,'new');assert.match(degradedPlan.history!.diagnostic!,/已降级/);
   const newRun=randomUUID(),output=join(dir,'work-contexts',newRun+'.native');await mkdir(output);const source=join(dir,'work-contexts',one.runId+'.native','session-root','sessions',one.sessionId.replaceAll('-','').slice(0,12),'session.json'),bytes=await readFile(source);
   await copyPreparedSession({runId:newRun,scope,preparedSession:{preparationRunId:one.runId,sourceRunId:one.runId,sessionId:one.sessionId,sessionSha256:sha(bytes)}},output);
   assert.deepEqual(await readFile(join(output,'session-root','sessions',one.sessionId.replaceAll('-','').slice(0,12),'session.json')),bytes);assert.deepEqual(await readFile(source),bytes);
   await assert.rejects(copyPreparedSession({runId:randomUUID(),scope:{...scope,taskId:'other'},preparedSession:{preparationRunId:one.runId,sourceRunId:one.runId,sessionId:one.sessionId,sessionSha256:sha(bytes)}},join(dir,'work-contexts','invalid.native')),/范围/);
   await writeFile(join(output,'manifest.json'),JSON.stringify({runId:newRun,scope,preparedSession:{preparationRunId:one.runId,sourceRunId:one.runId,sessionId:one.sessionId}}));
   const pending=await service.plan('member',plan.target);assert.equal(pending.actions[0].enabled,false);assert.match(pending.actions[0].reason!,/尚未取得原生会话回执/);
-  await assert.rejects(service.start('member',{requestId:randomUUID(),target:plan.target,action:'resume',planToken:pending.planToken}),/未重复启动/);assert.equal(starts.length,1);
+  await assert.rejects(service.start('member',{requestId:randomUUID(),target:plan.target,action:'resume',planToken:pending.planToken}),/未重复启动/);assert.equal(starts.length,2);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 
