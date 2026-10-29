@@ -5,7 +5,8 @@ import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { binary, root, runtimeDir } from './config.js';
+import { root, runtimeDir, selectICode } from './config.js';
+import { nativeInterpreters } from './icode-binary.js';
 import { atomicJson } from './store.js';
 import { readUnchangedSkillPackage, type NativeSkillPackage } from './skill-installation.js';
 import type { SkillApplicationReceipt } from '../src/skill-application.js';
@@ -20,23 +21,34 @@ export function nativePlatformEnvironment(): Promise<NativePlatformEnvironment> 
   return platformEnvironment;
 }
 async function resolveNativePlatformEnvironment(): Promise<NativePlatformEnvironment> {
-  const version=(await exec(binary,['--version'],{timeout:15000,maxBuffer:65536,windowsHide:true})).stdout.trim();
-  if(!/^\d+\.\d+\.\d+$/.test(version))throw new Error('iCode 未返回有效原生版本');
-  let python=process.env.DEMO_ICODE_PYTHON;
-  if(python){if(!isAbsolute(python)||!await executable(python))throw new Error('DEMO_ICODE_PYTHON 必须指向当前 iCode 安装的 Python 可执行绝对路径');}
-  else {
-    const cache=process.platform==='darwin'?join(homedir(),'Library/Application Support/pyapp/chrys'):process.platform==='win32'&&process.env.LOCALAPPDATA?join(process.env.LOCALAPPDATA,'pyapp','data','chrys'):join(process.env.XDG_DATA_HOME??join(homedir(),'.local','share'),'pyapp','chrys');
-    const candidates:string[]=[];
-    if(cache){let builds:string[]=[];try{builds=await readdir(cache);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
-      for(const build of builds){const path=join(cache,build,version,'python',process.platform==='win32'?'python.exe':'bin/python3');if(await executable(path))candidates.push(path);}}
-    if(candidates.length!==1)throw new Error('无法唯一定位当前 iCode 的原生 Python；请配置 DEMO_ICODE_PYTHON 后核验，未使用其他解析器');
-    python=candidates[0];
+  const selection=await selectICode();
+  if(!selection.path||!selection.version)throw new Error(selection.reason??'未找到可用的 iCode');
+  const version=selection.version;
+  const candidates=await nativePythonCandidates(selection.path,version);
+  if(!candidates.length)throw new Error('无法定位当前 iCode 的原生 Python；请配置 DEMO_ICODE_PYTHON 后核验');
+  const failures:string[]=[];
+  for(const python of candidates){
+    try{
+      const environment=JSON.parse((await exec(python,['-I',script,'--environment'],{cwd:root,timeout:15000,maxBuffer:65536,windowsHide:true})).stdout);
+      if(environment.nativeVersion!==version||typeof environment.configDirectory!=='string'||!isAbsolute(environment.configDirectory))throw new Error('原生 Python 与 iCode 版本或配置目录不匹配');
+      const configDirectory=await realpath(environment.configDirectory);
+      const sessionRoot=typeof environment.sessionRoot==='string'&&isAbsolute(environment.sessionRoot)?environment.sessionRoot:join(configDirectory,'sessions');
+      return {python,version,configDirectory,sessionRoot};
+    }catch(error){failures.push(python+'：'+(error as Error).message);}
   }
-  const environment=JSON.parse((await exec(python,['-I',script,'--environment'],{cwd:root,timeout:15000,maxBuffer:65536,windowsHide:true})).stdout);
-  if(environment.nativeVersion!==version||typeof environment.configDirectory!=='string'||!isAbsolute(environment.configDirectory))throw new Error('原生 Python 与 iCode 版本或配置目录不匹配');
-  const configDirectory=await realpath(environment.configDirectory);
-  const sessionRoot=typeof environment.sessionRoot==='string'&&isAbsolute(environment.sessionRoot)?environment.sessionRoot:join(configDirectory,'sessions');
-  return {python,version,configDirectory,sessionRoot};
+  throw new Error('无法定位当前 iCode 的原生 Python：'+failures.join('；')+'；请配置 DEMO_ICODE_PYTHON 后核验');
+}
+/** Interpreters that belong to the launcher we selected, then the PyApp runtime cache it may have left. */
+async function nativePythonCandidates(entry:string,version:string):Promise<string[]>{
+  const explicit=process.env.DEMO_ICODE_PYTHON;
+  if(explicit){if(!isAbsolute(explicit)||!await executable(explicit))throw new Error('DEMO_ICODE_PYTHON 必须指向当前 iCode 安装的 Python 可执行绝对路径');return [explicit];}
+  const candidates=nativeInterpreters(entry);
+  const cache=process.platform==='darwin'?join(homedir(),'Library/Application Support/pyapp/chrys'):process.platform==='win32'&&process.env.LOCALAPPDATA?join(process.env.LOCALAPPDATA,'pyapp','data','chrys'):join(process.env.XDG_DATA_HOME??join(homedir(),'.local','share'),'pyapp','chrys');
+  let builds:string[]=[];try{builds=await readdir(cache);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+  for(const build of builds)candidates.push(join(cache,build,version,'python',process.platform==='win32'?'python.exe':'bin/python3'));
+  const usable:string[]=[];
+  for(const candidate of candidates)if(!usable.includes(candidate)&&await executable(candidate))usable.push(candidate);
+  return usable;
 }
 export async function nativeSkillEnvironment() {
   const environment=await nativePlatformEnvironment();

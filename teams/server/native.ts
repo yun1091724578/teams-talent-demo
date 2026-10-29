@@ -8,7 +8,7 @@ import { access, readFile, mkdir, writeFile, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { binary, workspace, runtimeDir, codeRoot, root, origin, traceDataDir, icodeBinarySource, icodeBinaryNotes } from './config.js';
+import { binary, workspace, runtimeDir, codeRoot, root, origin, traceDataDir, icodeBinarySource, icodeBinaryNotes, selectICode } from './config.js';
 import { atomicJson, atomicText } from './store.js';
 import { nativeSkillEnvironment } from './native-skill-reader.js';
 import { nativeTraceRuntime } from './native-trace-runtime.js';
@@ -33,14 +33,9 @@ export async function nativeWorkspace() {
 }
 export async function toolsStatus() {
   const launchWorkspace=await nativeWorkspace();
-  let installedICode = false, installError: string | undefined;
-  try { installedICode = await installed(binary); }
-  catch (error) { installError = 'iCode 探测失败：' + (error as Error).message; }
-  let version: string | null = null, versionError: string | undefined;
-  if (installedICode) {
-    try { version = (await execute(binary, ['--version'], { timeout: 15000, windowsHide: true })).stdout.trim(); }
-    catch (error) { versionError = 'iCode 版本探测失败：' + (error as Error).message; }
-  }
+  const selection = await selectICode().catch(error => ({ path: undefined, version: undefined, source: icodeBinarySource, status: 'none' as const, notes: [...icodeBinaryNotes, 'iCode 探测失败：' + (error as Error).message] }));
+  const installedICode = selection.status === 'ready';
+  const version: string | null = selection.version ?? null;
   let opencode: string | null = null, openError: string | undefined;
   try { opencode = await openCodePath(); }
   catch (error) { openError = 'OpenCode 探测失败：' + (error as Error).message; }
@@ -50,10 +45,9 @@ export async function toolsStatus() {
     try { openVersion = (await execute(opencode, ['--version'], { timeout: 15000, windowsHide: true })).stdout.trim(); }
     catch (error) { openError = 'OpenCode 版本探测失败：' + (error as Error).message; }
   }
-  const notes = [...icodeBinaryNotes, ...(installError ? [installError] : []), ...(versionError ? [versionError] : [])];
   return {
     ...await terminalPreferences.context(),
-    icode: { installed: installedICode, path: binary, version, workspace:launchWorkspace, sessionId: '', sessionAvailable: false, active: null, source: icodeBinarySource, notes },
+    icode: { installed: installedICode, path: selection.path ?? binary, version, workspace: launchWorkspace, sessionId: '', sessionAvailable: false, active: null, source: selection.source, notes: selection.notes },
     opencode: { installed: !!opencode && !unsupportedReason, path: opencode, version: openVersion, unsupportedReason, notes: openError ? [openError] : [] },
     verification: null,
   };
@@ -98,7 +92,8 @@ export function launch(tool: 'icode' | 'opencode', restore: boolean, requestId: 
   if (launchBusy) return Promise.reject(new Error('启动请求正在执行'));
   launchBusy = true;
   const result = (async () => {
-    const entry = tool === 'icode' ? binary : await openCodePath();
+    const selection = await selectICode();
+    const entry = tool === 'icode' ? (selection.status === 'ready' ? selection.path : undefined) : await openCodePath();
     if (!entry || !await installed(entry)) throw new Error(tool + ' 尚未安装');
     if (restore) throw new Error('历史恢复入口已移除，请新建当前工作的会话');
     const directory=await nativeWorkspace();
@@ -114,10 +109,12 @@ export function launch(tool: 'icode' | 'opencode', restore: boolean, requestId: 
 
 /** Native work entry: caller has validated and pinned the project directory/configuration. */
 export async function nativeWorkDefaults(): Promise<(Omit<ProjectWorkPlan['instance'], 'installed' | 'name'> & {agent:string;agentLabel:string;model:string;modelLabel:string;terminal:{id:string;name:string;error?:string}}) | null> {
-  if (!await installed(binary)) return null;
+  const selection = await selectICode();
+  if (selection.status !== 'ready' || !selection.path) return null;
+  const entry = selection.path;
   const [agentReply, modelReply] = await Promise.all([
-    execute(binary, ['agent', '--json'], { timeout: 10000, maxBuffer: 262144 }),
-    execute(binary, ['model', '--json'], { timeout: 10000, maxBuffer: 262144 }),
+    execute(entry, ['agent', '--json'], { timeout: 10000, maxBuffer: 262144, windowsHide: true }),
+    execute(entry, ['model', '--json'], { timeout: 10000, maxBuffer: 262144, windowsHide: true }),
   ]);
   const agents = JSON.parse(agentReply.stdout), models = JSON.parse(modelReply.stdout);
   if (!Array.isArray(agents.agents) || !Array.isArray(models.models)) throw new Error('iCode 默认配置响应无效');
@@ -134,6 +131,9 @@ export async function nativeWorkDefaults(): Promise<(Omit<ProjectWorkPlan['insta
 }
 export async function startNativeWork(input: { directory: string; agent: string; model: string; sessionId?: string; instruction: string; terminal: string; task?: { runId: string; path: string; scope: { projectId: string; taskId: string; nodeId: string }; preparedSession?: { preparationRunId: string; sourceRunId: string; sessionSha256: string; sessionId: string } } }) {
   if (process.env.DEMO_NATIVE_DISABLED === '1') throw new Error('此验证实例未开放真实原生启动');
+  const selection = await selectICode();
+  if (selection.status !== 'ready' || !selection.path) throw new Error('iCode 尚未安装');
+  const entry = selection.path;
   if (input.task) {
     if (!/^[0-9a-f-]{36}$/i.test(input.task.runId) || input.sessionId && input.task.preparedSession?.sessionId !== input.sessionId) throw new Error('当前任务只允许新会话或已核验的同任务准备会话');
     const output = join(runtimeDir, 'work-contexts', input.task.runId + '.native');
@@ -142,7 +142,7 @@ export async function startNativeWork(input: { directory: string; agent: string;
     if (trace.enabled) await checkNativeTraceReceiver(trace.endpoint, expectedTraceReceiver());
     await mkdir(output, { recursive: true });
     const manifest = join(output, 'manifest.json');
-    await atomicJson(manifest, { version: 1, executionMode: 'interactive', runId: input.task.runId, scope: input.task.scope, executable: binary, directory: input.directory, agent: input.agent, model: input.model, ...(input.task.preparedSession?{preparedSession:input.task.preparedSession}:{}), trace: {...traceLaunchSettings(trace),...expectedTraceReceiver(),runtime:traceRuntime}, taskFile: input.task.path, taskSha256: createHash('sha256').update(await readFile(input.task.path)).digest('hex') });
+    await atomicJson(manifest, { version: 1, executionMode: 'interactive', runId: input.task.runId, scope: input.task.scope, executable: entry, directory: input.directory, agent: input.agent, model: input.model, ...(input.task.preparedSession?{preparedSession:input.task.preparedSession}:{}), trace: {...traceLaunchSettings(trace),...expectedTraceReceiver(),runtime:traceRuntime}, taskFile: input.task.path, taskSha256: createHash('sha256').update(await readFile(input.task.path)).digest('hex') });
     const nativeEnvironment = traceRuntime ?? await nativeSkillEnvironment();
     await ensureNativeTuiHooks(join(root, 'scripts/native/tui-work-hook.mjs'), join(runtimeDir, 'native-hook-backups'), nativeEnvironment.configDirectory, join(root, '..', 'demo', 'scripts/native/tui-work-hook.mjs'));
     const terminal = await terminalPreferences.selected(input.terminal);
@@ -152,12 +152,15 @@ export async function startNativeWork(input: { directory: string; agent: string;
   }
   const args = ['-C', input.directory, '--agent', input.agent, '--model', input.model, ...(input.sessionId ? ['--session', input.sessionId] : [])];
   const terminal = await terminalPreferences.selected(input.terminal);
-  return terminalLauncher.launch({ executable: binary, directory: input.directory, args, instruction: input.instruction, terminal: terminal.id });
+  return terminalLauncher.launch({ executable: entry, directory: input.directory, args, instruction: input.instruction, terminal: terminal.id });
 }
 
 /** Explicit non-interactive work: no terminal and no implicit task advancement. */
 export async function startNativeCliWork(input: Omit<Parameters<typeof startNativeWork>[0], 'terminal'>) {
   if(process.env.DEMO_NATIVE_DISABLED==='1')throw new Error('此验证实例未开放真实原生启动');
+  const selection=(await selectICode());
+  if(selection.status!=='ready'||!selection.path)throw new Error('iCode 尚未安装');
+  const entry=selection.path;
   if(!input.task||!/^[0-9a-f-]{36}$/i.test(input.task.runId)||!input.task.preparedSession||input.sessionId!==input.task.preparedSession.sessionId)throw new Error('CLI 工作必须恢复当前任务已核验的准备会话');
   const output=join(runtimeDir,'work-contexts',input.task.runId+'.native');
   const trace=nativeTraceEnvironment(process.env,{...input.task.scope,runId:input.task.runId});
@@ -165,7 +168,7 @@ export async function startNativeCliWork(input: Omit<Parameters<typeof startNati
   if(trace.enabled)await checkNativeTraceReceiver(trace.endpoint,expectedTraceReceiver());
   await mkdir(output,{recursive:true});
   const manifest=join(output,'manifest.json');
-  await atomicJson(manifest,{version:1,executionMode:'task-file',runId:input.task.runId,scope:input.task.scope,executable:binary,directory:input.directory,agent:input.agent,model:input.model,preparedSession:input.task.preparedSession,trace:{...traceLaunchSettings(trace),...expectedTraceReceiver(),runtime:traceRuntime},taskFile:input.task.path,taskSha256:createHash('sha256').update(await readFile(input.task.path)).digest('hex')});
+  await atomicJson(manifest,{version:1,executionMode:'task-file',runId:input.task.runId,scope:input.task.scope,executable:entry,directory:input.directory,agent:input.agent,model:input.model,preparedSession:input.task.preparedSession,trace:{...traceLaunchSettings(trace),...expectedTraceReceiver(),runtime:traceRuntime},taskFile:input.task.path,taskSha256:createHash('sha256').update(await readFile(input.task.path)).digest('hex')});
   const out=await open(join(output,'observer-output.log'),'wx',0o600);let err:Awaited<ReturnType<typeof open>>|undefined;
   try {
     err=await open(join(output,'observer-error.log'),'wx',0o600);

@@ -17,7 +17,7 @@ function fixture(){const state=initialState(),task=createDeliveryRequirement(sta
 function passing(){const input=partial();input.notRunScopes=[];input.runs[1]={...input.runs[1],status:'passed',exitCode:0,passed:4,executedAt:at};return input;}
 
 test('the exact observed report with JS14 passed and unexecuted Java4 cannot complete development, including v1 new writes',async()=>{
- const bytes=await readFile(reportPath);assert.equal(createHash('sha256').update(bytes).digest('hex'),'23025e36d9a4cef6f1cc17bdbf01a17099d39b5544f7a5782f59bd3145bed34a');assert.match(bytes.toString(),/14 passed/);assert.match(bytes.toString(),/新增 4 个 JUnit/);
+ const bytes=await readFile(reportPath);assert.equal(createHash('sha256').update(bytes).digest('hex'),'23025e36d9a4cef6f1cc17bdbf01a17099d39b5544f7a5782f59bd3145bed34a','这份观测报告必须逐字节检出（.gitattributes 已标记 -text）；CRLF 检出会改变 SHA256，重新检出该文件后再跑');assert.match(bytes.toString(),/14 passed/);assert.match(bytes.toString(),/新增 4 个 JUnit/);
  for(const version of ['delivery-node-v1','delivery-node-v2',undefined] as const){const {state,task}=fixture();task.nodeContractVersion=version;const before=JSON.stringify(task);const errors=nodeResultErrors(state,task,'develop',evidence(),nodeResultFixture('develop').completedCriteria,undefined);assert.match(errors.join(';'),/未执行|未完整执行/);assert.throws(()=>applyRequirementProgress(task,{nodeId:'develop',phase:'result',summary:'报告已写',sessionId:'scope-session',evidence:evidence()},at),/未执行|未完整执行/);assert.equal(JSON.stringify(task),before);applyRequirementProgress(task,{nodeId:'develop',phase:'blocked',summary:'缺少Java测试执行',sessionId:'scope-session',evidence:evidence()},at);assert.equal(task.stage,'developing');assert.equal(task.nodes.develop.status,'blocked');}
 });
 

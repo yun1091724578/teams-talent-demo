@@ -1,6 +1,14 @@
 # These published inputs are identified by their original byte hashes. Some Skill
 # files intentionally contain CRLF; do not normalize either LF or CRLF on checkout.
 /workspace/.agents/skills/** -text
-/talents/content/four-requirements/** -text
+/talents/content/** -text
 /shared/seed/talents/files/a-req-2026-*/** -text
 /teams/fixtures/skill-source-files.json -text
+# Archived CodeGraph snapshots are verified against checksums in their manifest.
+/talents/data/codegraph/snapshots/** -text
+# The imported CardDemo snapshot is provenance evidence: its files are hashed by
+# published Talents manifests, so a CRLF checkout must not rewrite their bytes.
+/workspace/carddemo-java-1025/** -text
+# The unit-test gate pins this observed report's exact bytes; a CRLF checkout
+# changes its SHA256 and invalidates the evidence it represents.
+/teams/tests/fixtures/unexecuted-java-unit-report.md -text
