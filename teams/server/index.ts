@@ -32,7 +32,6 @@ import { updateWorkspace, type WorkspaceAction } from '../src/workspace.js';
 import { headers, bodyJson, staticFile, readFixtures } from './http-shared.js';
 import { teamsSnapshot, knowledgeVersion, projectKnowledge, projectSkillVersions, readTalentsFile } from './shared-data.js';
 import { transition } from '../src/domain.js';
-import { isTraceApi, proxyTrace, startTraceService, stopTraceService } from './trace-service.js';
 import { ProjectWorkService } from './project-work.js';
 import { collaborationContext, collaborationOperation, collaborationWrite } from './collaboration-service.js';
 import { SharedChanges } from './shared-changes.js';
@@ -218,7 +217,6 @@ const server = createServer(async (request, response) => {
       throw new DomainError('接口不存在', 404);
     }
     if (request.method === 'GET' && await staticFile(path, 'teams', response)) return;
-    if (request.method === 'GET' && isTraceApi(path)) { await proxyTrace(path, url.search, response); return; }
     json(404, { error: '页面不存在' });
   } catch (error) {
     const status = error instanceof DomainError ? error.status : 500;
@@ -226,17 +224,13 @@ const server = createServer(async (request, response) => {
   }
 });
 server.on('error', error => { console.error(error.message); shutdown(1); });
-let traceStarting:Promise<void>|null=null;
 server.listen(port, '127.0.0.1', async () => {
   await mkdir(runtimeDir, { recursive: true });
   taskPreparationService.resumeQueued();
   console.log('Teams: ' + origin + '/teams');
   console.log('Talents: ' + talentOrigin + '/talents（独立启动）');
-  if(process.env.DEMO_NATIVE_DISABLED!=='1')traceStarting=startTraceService().then(
-    () => console.log('Trace 查询服务: /trace-monitor/'),
-    error => console.error('Trace 查询服务未启动：' + (error instanceof Error ? error.message : String(error))),
-  );
+
 });
 let stopping=false;
-async function shutdown(code:number){if(stopping)return;stopping=true;try{const closed=new Promise<void>(resolve=>server.close(()=>resolve()));sharedChanges.close();await closed;await traceStarting;await stopTraceService();await releaseTaskMaintenance();process.exit(code);}catch(error){console.error(error);process.exit(1);}}
+async function shutdown(code:number){if(stopping)return;stopping=true;try{const closed=new Promise<void>(resolve=>server.close(()=>resolve()));sharedChanges.close();await closed;await releaseTaskMaintenance();process.exit(code);}catch(error){console.error(error);process.exit(1);}}
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {void shutdown(0);});

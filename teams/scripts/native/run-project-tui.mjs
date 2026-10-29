@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 // Interactive launch: the child inherits the terminal, while observation only writes runtime receipts.
-import { promisify } from 'node:util';
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFile, realpath, open, mkdir, readdir, rename, writeFile, cp } from 'node:fs/promises';
 import { dirname, join, resolve, isAbsolute } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { nativeTraceEnvironment, checkNativeTraceReceiver, traceLaunchEnvironment } from './tui-trace.mjs';
 import { interactiveEnvironment } from './interactive-environment.mjs';
-import { loopbackProxyEnvironment } from './native-environment.mjs';
+import { loopbackProxyEnvironment, withoutNativeTrace } from './native-environment.mjs';
 import { nativeProcessActive } from './session-liveness.mjs';
 async function atomic(path, value) { const temp = path + '.' + randomUUID() + '.tmp'; await writeFile(temp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); await rename(temp, path); }
 export async function copyPreparedSession(manifest, output) {
@@ -52,22 +50,14 @@ export async function runProjectTui(manifestPath) {
   if (![process.stdin, process.stdout, process.stderr].every(stream => stream.isTTY)) throw new Error('交互式 iCode 必须在真实终端中运行（stdin/stdout/stderr 均需 TTY）');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')), output = await realpath(dirname(manifestPath)), directory = await realpath(manifest.directory);
   if (manifest.version !== 1 || manifest.executionMode !== 'interactive' || !/^[0-9a-f-]{36}$/i.test(manifest.runId) || !isAbsolute(manifest.executable) || manifest.directory !== directory || createHash('sha256').update(await readFile(manifest.taskFile)).digest('hex') !== manifest.taskSha256) throw new Error('TUI 启动材料无效或已变化');
-  const trace = nativeTraceEnvironment(traceLaunchEnvironment(process.env, manifest.trace), { ...manifest.scope, runId: manifest.runId }, manifest.trace?.endpoint);
-  if (trace.enabled) {
-    if (manifest.trace?.runtime) {
-      const runtime=manifest.trace.runtime,check=JSON.parse((await promisify(execFile)(runtime.python,['-I',runtime.script],{timeout:15000,maxBuffer:65536})).stdout);
-      if(check.ready!==true || check.sdkVersion!==runtime.sdkVersion || check.exporterVersion!==runtime.exporterVersion) throw new Error('iCode OTLP 运行依赖已变化，请重新核验启动配置');
-    }
-    await checkNativeTraceReceiver(trace.endpoint, manifest.trace);
-  }
   const startedAt = new Date().toISOString(), sentinel = await open(join(output, 'started.json'), 'wx', 0o600);
   try { await sentinel.writeFile(JSON.stringify({ runId: manifest.runId, startedAt, executionMode: 'interactive' })); } finally { await sentinel.close(); }
   const sessionRoot = join(output, 'session-root');
   if(manifest.preparedSession)await copyPreparedSession(manifest,output);else await mkdir(sessionRoot);
   const args = ['-C', directory, '--agent', manifest.agent, '--model', manifest.model, ...(manifest.preparedSession ? ['--session', manifest.preparedSession.sessionId] : [])];
-  const child = spawn(manifest.executable, args, { cwd: directory, env: { ...loopbackProxyEnvironment(interactiveEnvironment(trace.env)), CHRYS_SESSION_ROOT_DIR: sessionRoot, TEAMS_TUI_MANIFEST: manifestPath }, stdio: 'inherit' });
+  const child = spawn(manifest.executable, args, { cwd: directory, env: { ...loopbackProxyEnvironment(interactiveEnvironment(withoutNativeTrace(process.env))), CHRYS_SESSION_ROOT_DIR: sessionRoot, TEAMS_TUI_MANIFEST: manifestPath }, stdio: 'inherit' });
   const result = new Promise(resolve => { child.once('error', error => resolve({ code: null, error: error.message })); child.once('close', (code, signal) => resolve({ code, signal })); });
-  await atomic(join(output, 'process.json'), { runId: manifest.runId, executable: manifest.executable, args, directory, pid: child.pid ?? null, startedAt, sessionRoot, executionMode: 'interactive', tty: { stdin: true, stdout: true, stderr: true }, trace: { endpoint: trace.endpoint, enabled: trace.enabled, sensitiveData: trace.sensitiveData } });
+  await atomic(join(output, 'process.json'), { runId: manifest.runId, executable: manifest.executable, args, directory, pid: child.pid ?? null, startedAt, sessionRoot, executionMode: 'interactive', tty: { stdin: true, stdout: true, stderr: true } });
   let done = false, session, observerError;
   const observe = (async () => {
     while (!done && !session) {

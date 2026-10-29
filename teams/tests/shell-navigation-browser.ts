@@ -77,13 +77,11 @@ try {
   const workPage = await workContext.newPage(); workPage.setDefaultTimeout(10000);
   workPage.on('request', request => { if (request.method() === 'POST') posts.push(request.url()); });
   workPage.on('pageerror', error => errors.push(error.message));
-  await workPage.goto(teams + '/teams?demo-role=owner#/trace-monitor');
-  await workPage.waitForURL(url => url.hash === '#/team-work?tab=sessions&view=traces');
-  await workPage.frameLocator('.trace-monitor-frame').locator('.tm-page').first().waitFor();
+  await workPage.goto(teams + '/teams?demo-role=owner#/team-work?tab=sessions');
   assert.equal(await workPage.getByRole('link', { name: '开发会话轨迹', exact: true }).count(), 0);
-  assert.equal(await workPage.getByRole('tab', { name: '会话与轨迹', exact: true }).getAttribute('aria-selected'), 'true');
-  await workPage.locator('.ant-segmented').getByText('任务会话', { exact: true }).click();
-  await workPage.waitForURL(url => url.hash === '#/team-work?tab=sessions&view=conversations');
+  await workPage.getByRole('tab', { name: '任务会话', exact: true }).waitFor();
+  assert.equal(await workPage.getByRole('tab', { name: '任务会话', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await workPage.getByText('调用 Trace', { exact: true }).count(), 0);
   await workPage.locator('.team-work-conversation-view').waitFor({ state: 'visible' });
   await workPage.getByRole('tab', { name: '任务作业', exact: true }).click();
   await workPage.waitForURL(url => url.hash === '#/team-work');

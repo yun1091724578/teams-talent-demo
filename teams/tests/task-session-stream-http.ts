@@ -77,12 +77,15 @@ try {
   const cards = await page.locator('.team-work-conversation-layout > .framework-card').evaluateAll(elements => elements.map(element => { const box = element.getBoundingClientRect(); return { x: box.x, y: box.y, bottom: box.bottom }; }));
   assert.equal(cards.length, 2); assert.ok(cards[1].y >= cards[0].bottom - 1); assert.equal(await page.evaluate(() => globalThis.document.documentElement.scrollWidth > globalThis.innerWidth), false);
   await page.screenshot({ path: join(output, 'team-work-conversation-mobile.png'), fullPage: true, animations: 'disabled' });
-  await page.locator('.ant-segmented').getByText('调用 Trace', { exact: true }).click(); await page.frameLocator('.trace-monitor-frame').locator('.tm-page').first().waitFor();
-  const pausedStreamRequests = streamRequests; await page.waitForTimeout(2100); assert.equal(streamRequests, pausedStreamRequests, 'hidden Trace view must pause conversation polling');
-  const resumed = page.waitForRequest(request => request.url().includes('/api/task-session-stream?'));
-  await page.locator('.ant-segmented').getByText('任务会话', { exact: true }).click(); await resumed; await page.locator('[data-session-message="reply-1"]').waitFor();
+  assert.equal(await page.getByText('调用 Trace', { exact: true }).count(), 0);
+  assert.equal(await page.locator('.trace-monitor-frame').count(), 0);
+  for (const path of ['/trace-monitor/', '/trace-api/projects/carddemo/traces']) assert.equal((await fetch(origin + path)).status, 404);
+  const previousStreamRequests = streamRequests; await page.waitForTimeout(2200); assert.ok(streamRequests > previousStreamRequests, 'conversation polling remains active without OTLP');
+  await page.goto(origin + '/teams?demo-role=owner#/team-work?' + selection.toString().replace('view=conversations', 'view=traces'));
+  await page.locator('[data-session-message="reply-1"]').waitFor();
+  assert.equal(await page.locator('.trace-monitor-frame').count(), 0);
   assert.deepEqual(posts, []); assert.deepEqual(errors, []); assert.equal((await readFile(join(runtime, 'state.json'))).equals(beforeConversationReload), true, 'conversation reload must not alter state bytes');
-  await writeFile(join(output, 'http-result.json'), JSON.stringify({ passed: true, at: new Date().toISOString(), realServer: true, nativeExecution: false, nativeFiles: 'isolated protocol fixture', businessPosts: 0, stateFileUnchanged: true, checks: ['actual GET route', 'incremental append', 'cursor dedup', 'role/task/node isolation', 'native failure remains explicit', 'no-store', 'team-work conversation rendered from native files', 'conversation route survives reload', 'mobile conversation layout', 'hidden views pause conversation polling'] }, null, 2));
+  await writeFile(join(output, 'http-result.json'), JSON.stringify({ passed: true, at: new Date().toISOString(), realServer: true, nativeExecution: false, nativeFiles: 'isolated protocol fixture', businessPosts: 0, stateFileUnchanged: true, checks: ['actual GET route', 'incremental append', 'cursor dedup', 'role/task/node isolation', 'native failure remains explicit', 'no-store', 'team-work conversation rendered from native files', 'conversation route survives reload', 'mobile conversation layout', 'conversation polling works without OTLP', 'retired trace endpoints return 404'] }, null, 2));
   console.log('PASS read-only session stream HTTP and team-work real conversation UI; no business writes');
 } finally {
   await browser?.close();

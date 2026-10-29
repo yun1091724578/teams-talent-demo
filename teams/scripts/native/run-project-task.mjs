@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 // Observe an actual iCode run. This launcher never calls a Teams business API.
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream, constants } from 'node:fs';
 import { access, mkdir, open, readFile, readdir, realpath, rename } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 import { copyPreparedSession } from './run-project-tui.mjs';
-import { nativeTraceEnvironment, checkNativeTraceReceiver, traceLaunchEnvironment } from './tui-trace.mjs';
-import { loopbackProxyEnvironment } from './native-environment.mjs';
+import { loopbackProxyEnvironment, withoutNativeTrace } from './native-environment.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 async function atomicJson(path, value) {
@@ -23,11 +21,6 @@ async function executeProjectTask(manifestPath, lifecycle) {
   if (manifest.version !== 1 || !/^[0-9a-f-]{36}$/i.test(manifest.runId) || !isAbsolute(manifest.executable) || !isAbsolute(manifest.taskFile) || !manifest.agent || !manifest.model || directory !== manifest.directory) throw new Error('Native task manifest is invalid');
   await access(manifest.executable, constants.X_OK);
   if (digest(await readFile(manifest.taskFile)) !== manifest.taskSha256) throw new Error('Task prompt changed after confirmation; native run was not started');
-  const trace = manifest.trace ? nativeTraceEnvironment(traceLaunchEnvironment(process.env,manifest.trace),{...manifest.scope,runId:manifest.runId},manifest.trace.endpoint) : null;
-  if(trace?.enabled){
-    if(manifest.trace.runtime){const r=manifest.trace.runtime,check=JSON.parse((await promisify(execFile)(r.python,['-I',r.script],{timeout:15000,maxBuffer:65536,windowsHide:true})).stdout);if(!check.ready||check.sdkVersion!==r.sdkVersion||check.exporterVersion!==r.exporterVersion)throw new Error('iCode OTLP运行依赖已变化');}
-    await checkNativeTraceReceiver(trace.endpoint,manifest.trace);
-  }
   const sentinel = await open(join(output, 'started.json'), 'wx', 0o600);
   const startedAt = new Date().toISOString();
   try { await sentinel.writeFile(JSON.stringify({ runId: manifest.runId, startedAt })); await sentinel.sync(); } finally { await sentinel.close(); }
@@ -38,7 +31,7 @@ async function executeProjectTask(manifestPath, lifecycle) {
   const stderr = createWriteStream(join(output, 'stderr.log'), { flags: 'wx', mode: 0o600 });
   let outputText = '', session, observerError, done = false;
   lifecycle.spawnAttempted = true;
-  const child = spawn(manifest.executable, args, { cwd: directory, env: { ...loopbackProxyEnvironment(trace?.env ?? process.env), CHRYS_SESSION_ROOT_DIR: sessionRoot, TEAMS_TUI_MANIFEST: '' }, windowsHide:true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(manifest.executable, args, { cwd: directory, env: { ...loopbackProxyEnvironment(withoutNativeTrace(process.env)), CHRYS_SESSION_ROOT_DIR: sessionRoot, TEAMS_TUI_MANIFEST: '' }, windowsHide:true, stdio: ['ignore', 'pipe', 'pipe'] });
   const finished = new Promise(resolve => { child.once('error', error => resolve({ code: null, signal: null, error: error.message })); child.once('close', (code, signal) => resolve({ code, signal })); });
   await atomicJson(join(output, 'process.json'), { runId: manifest.runId, executable: manifest.executable, args, directory, pid: child.pid ?? null, startedAt, sessionRoot, ...(manifest.executionMode?{executionMode:manifest.executionMode}: {}) });
   child.stdout.on('data', bytes => { outputText += bytes.toString('utf8'); stdout.write(bytes); process.stdout.write(bytes); });

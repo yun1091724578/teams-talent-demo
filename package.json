@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "npm ci --prefix teams && npm ci --prefix teams/trace-monitor && npm ci --prefix talents",
+    "setup": "npm ci --prefix teams && npm ci --prefix talents",
     "dev": "node scripts/demo.mjs dev --open",
     "start": "node scripts/demo.mjs start --open",
     "stop": "node scripts/demo.mjs stop",

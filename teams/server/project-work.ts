@@ -20,7 +20,7 @@ import type { NativePreparationResult } from '../src/native-preparation.js';
 import { taskAutomation, taskNodeKnowledge, type KnowledgeNode, type TaskScope } from '../src/task-automation.js';
 import { projectMembers } from '../src/teams-domain.js';
 import { binary, selectICode } from './config.js';
-import { nativeTraceEnvironment } from '../scripts/native/tui-trace.mjs';
+import { withoutNativeTrace } from '../scripts/native/native-environment.mjs';
 import { readNativeTuiEnvelope } from './task-session-documents.js';
 import { nativeProcessActive, inspectNativeProcess } from '../scripts/native/session-liveness.mjs';
 import { focusWorkTerminal } from './terminal-focus.js';
@@ -136,7 +136,6 @@ export class ProjectWorkService {
     const plan = await this.plan('owner', target, assigneeId);
     if (!plan.directory.valid || !plan.directory.root) return { status: 'waiting-directory', reason: plan.directory.diagnostic };
     if (!plan.instance.installed || !plan.instance.agent || !plan.instance.model) throw new Error('iCode 或当前 Agent / 模型配置不可用');
-    if (plan.instance.trace?.readiness === 'unavailable') throw new Error(plan.instance.trace.diagnostic);
     const contextPath = join(this.directory,'work-contexts',preparationId+'.preparation.json'), taskFile = join(this.directory,'work-contexts',preparationId+'.preparation.md');
     let reads: PreparationInput['reads'];
     try { reads = JSON.parse(await readFile(join(this.directory,'work-contexts',preparationId+'.native','preparation-request.json'),'utf8')).reads; }
@@ -149,9 +148,8 @@ export class ProjectWorkService {
       reads = await Promise.all([contextPath,collaborationSkillPath].map(async path=>({path,sha256:createHash('sha256').update(await readFile(path)).digest('hex')})));
     }
     verify(); // Reassignment or a replaced queue must not start an obsolete model turn.
-    const trace = nativeTraceEnvironment(process.env,{...scope,nodeId:'prepare',runId:preparationId});
     const selected = await selectICode();
-    return this.prepareTransport({runId:preparationId,scope:{...scope,nodeId:'prepare'},assigneeId,directory:plan.directory.root,executable:selected.status==='ready'?selected.path!:binary,runner:join(root,'scripts/native/run-project-task.mjs'),runtime:this.directory,taskFile,contextPath,skillPath:collaborationSkillPath,reads,agent:plan.instance.agent,agentLabel:plan.instance.agentLabel??plan.instance.agent,model:plan.instance.model,modelLabel:plan.instance.modelLabel??plan.instance.model,env:trace.env});
+    return this.prepareTransport({runId:preparationId,scope:{...scope,nodeId:'prepare'},assigneeId,directory:plan.directory.root,executable:selected.status==='ready'?selected.path!:binary,runner:join(root,'scripts/native/run-project-task.mjs'),runtime:this.directory,taskFile,contextPath,skillPath:collaborationSkillPath,reads,agent:plan.instance.agent,agentLabel:plan.instance.agentLabel??plan.instance.agent,model:plan.instance.model,modelLabel:plan.instance.modelLabel??plan.instance.model,env:withoutNativeTrace(process.env)});
   }
   private async bindings(): Promise<Record<string, string>> {
     try { const value = JSON.parse(await readFile(join(this.directory, 'project-work-bindings.json'), 'utf8')); if (!value || Array.isArray(value) || Object.values(value).some(path => typeof path !== 'string' || !isAbsolute(path))) throw new Error('本机目录绑定记录损坏'); return value; }
@@ -262,12 +260,12 @@ export class ProjectWorkService {
     const knowledgeReason = nodeKnowledge && nodeKnowledge.status !== 'ready' ? (nodeKnowledge.status === 'waiting-upstream' ? '当前节点等待上游交付物确认，知识与 Skill 尚未准备' : nodeKnowledge.error ?? '当前节点的知识与 Skill 尚未准备完成，请稍后进入') : undefined;
     const history=preparation?.status==='ready'?await this.preparedHistory({projectId:requirement!.projectId,taskId:requirement!.id}):undefined;
     const preparationReason=preparation ? history ? history.available?undefined:history.diagnostic : preparation.error??(preparation.status==='waiting-directory'?'请先配置当前任务工作目录，再继续准备会话':preparation.status==='failed'?'会话准备未完成，请先重试准备':'知识与会话正在准备，请稍后进入') : undefined;
-    const launchReason = !defaults ? '配套 iCode 未安装' : (mode==='tui'?defaults.terminal.error:undefined) ?? (requirement && defaults.trace?.readiness === 'unavailable' ? defaults.trace.diagnostic : undefined) ?? (!directory.valid ? directory.diagnostic : undefined);
+    const launchReason = !defaults ? '配套 iCode 未安装' : (mode==='tui'?defaults.terminal.error:undefined) ?? (!directory.valid ? directory.diagnostic : undefined);
     const cliReason=mode==='cli'?(!requirement||!['prepare','develop','verify'].includes(work.target.nodeId??'')?'CLI 工作需要明确的当前交付任务和节点':history?.active?'当前任务会话仍在运行；CLI 不会重复恢复，请等待原作业结束':!history?.prepared?'请先完成本任务知识与真实会话准备，再发起 CLI 工作':undefined):undefined;
     const workspaceReason=requirement&&!preparedDirectory&&!requirement.workDirectory&&await configuredProjectWorkspace(this.directory,work.target.projectId)&&!await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo)?'请先准备需求会话，由准备流程创建独立任务工作区':undefined;
     const reason = taskStartReason ?? workspaceReason ?? cliReason ?? preparationReason ?? (history?.active ? undefined : launchReason ?? knowledgeReason);
     const actions: ProjectWorkPlan['actions'] = [{ id: history?.active ? 'focus' : history ? 'resume' : 'new', label: history?.active ? '进入正在运行的会话' : history ? '进入已准备会话' : requirement ? '打开当前节点的 iCode 交互会话' : '新建当前工作的 iCode 会话', enabled: !reason, ...(reason ? { reason } : {}) }];
-    const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary: (await selectICode()).path??binary, ...defaults, trace: requirement ? defaults?.trace : undefined }, directory, context, actions, defaultAction: 'new' };
+    const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary: (await selectICode()).path??binary, ...defaults }, directory, context, actions, defaultAction: 'new' };
     if(history){plan.history=history;plan.defaultAction=history.active?'focus':'resume';}
     plan.planToken = hash({ role, plan, revision: state.revision });
     plan.previous = await this.previous(work.target); return plan;
@@ -329,7 +327,7 @@ export class ProjectWorkService {
     const taskInstructions = requirement ? `\n## 本次交互工作范围\n需求正文见结构化上下文 agreement.background；已确认事项与依据见 agreement.confirmations（准备节点同时列入 nodeContract 输入），未登记事项保持待确认，不得自行确认。本次进入时所选节点为 ${plan.target.nodeId}；这不是会话整个生命周期的固定节点。${mode==='cli'?'本次 CLI 下方工作指令是初始化只读轮之后开发者明确授权的工作轮；它结束初始化的等待，但不代替 prepare.confirmed 或任何业务门禁。只执行本次所选节点范围，完成后结束本轮；不自动切换或连跑其它节点。':'先等待开发者的工作指令，仅执行当前节点授权范围，不自动连跑。'}节点输入、产物与标准以 context.nodeContract 为准；CLI 协作步骤和参数按上述 Skill，不另设一份合同。\n\n${gitBoundary}\n实际代码仅可修改本次工作目录 ${directory}，不得修改 Teams/Talents 应用工程、原始参考资料、全局 iCode 设置、历史会话或其他任务。只有开发者已明确开始 develop、当前需求实现完成且必要范围单元测试实际通过后，才按协作 Skill 提交本任务变更、推送任务分支并创建或更新 PR，PR base 必须为 ${binding?.baseBranch??'未配置（不允许提交）'}，复用本任务已有分支/PR。只暂存当前任务允许路径或变更块，不用 git add .；不收其他任务或暂存区原有无关改动。回传真实 PR 链接和准确 commit/codeVersion。不得直接推 main/master 或交付基线 ${binding?.baseBranch??'未配置'}、合并 PR、部署或另行委派 agent。Git 仓库、remote、权限或混合改动边界不能核验时回传 blocked，不伪造 PR；初始化、prepare 或仅打开 TUI 不授权提交。\n\n原生会话身份读取 ${nativeSessionPath}，核对本任务与 runId=${body.requestId}。尚未出现时最多等 15 秒，仍无则报告并停止，不编造或借用历史 ID。开发者明确切节点时保留项目/任务/角色/run/session/tab，使用新 nodeId 获取 ready 输入并独立采用，不复用旧 adoptionId。最终停在待 Owner 验收，不直接改状态文件、绕过 CLI 写 API 或代替 Owner 验收。\n` : '';
     const content = `# ${plan.projectName} · ${plan.title}\n\n工作位置：${plan.location}\n来源：${plan.source}\n\n${plan.context.summary}\n采用版本：${plan.context.versions}\n\n## 工作标识\n${JSON.stringify({ ...plan.target, role, runId: body.requestId, sessionId: body.action === 'new' ? null : plan.history!.sessionId }, null, 2)}\n\n## 项目资料与选择\n${JSON.stringify({...plan.context,selectedSkills:context.skills.map(skill=>skill.id)}, null, 2)}\n\n## 开始工作时读取\n${instruction}\n\n准备时读取的结构化上下文：${contextJsonPath}\n${taskInstructions}${mode==='cli'?`\n## 本次开发者工作指令\n${body.instruction!.trim()}\n`:''}\n本文件由 Teams 导出。提供入口不代表 iCode 已读取、采用或完成工作。\n`;
     await atomicText(contextPath, content);
-    const receipt: ProjectWorkReceipt = { executionMode: plan.executionMode, requestId: body.requestId, ...(plan.instance.trace ? {trace:plan.instance.trace} : {}), target: plan.target, action: body.action, status: 'prepared', at: new Date().toISOString(), directory, sessionId: body.action === 'new' ? null : plan.history!.sessionId, contextPath, instruction, note: '启动请求已准备；尚未观察到原生会话。' };
+    const receipt: ProjectWorkReceipt = { executionMode: plan.executionMode, requestId: body.requestId, target: plan.target, action: body.action, status: 'prepared', at: new Date().toISOString(), directory, sessionId: body.action === 'new' ? null : plan.history!.sessionId, contextPath, instruction, note: '启动请求已准备；尚未观察到原生会话。' };
     await atomicJson(path, { identity, receipt });
     try {
       if (body.action === 'focus') { const focused = await this.transport.focus(plan.history!); receipt.status = 'terminal-focused'; receipt.note = focused.note; }

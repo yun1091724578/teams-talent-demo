@@ -17,9 +17,6 @@ const url = project => `http://127.0.0.1:${project.port}${project.page}`;
 
 function prepare(project) {
   if (!existsSync(join(project.dir, 'node_modules')) && npm(project.dir, ['ci', '--no-audit', '--no-fund']).status !== 0) process.exit(1);
-  // Teams embeds the trace monitor; without its dependencies the build skips it and only that page is unavailable.
-  const traceMonitor = join(project.dir, 'trace-monitor');
-  if (existsSync(join(traceMonitor, 'package.json')) && !existsSync(join(traceMonitor, 'node_modules')) && npm(traceMonitor, ['ci', '--no-audit', '--no-fund']).status !== 0) console.warn('trace-monitor 依赖安装失败，「开发会话轨迹」页面不可用');
   if (npm(project.dir, ['run', 'build']).status !== 0) process.exit(1);
 }
 const server = (project, stdio, detached = false) => spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], { cwd: project.dir, env: project.env, stdio, detached, windowsHide: true });

@@ -8,19 +8,17 @@ import { access, readFile, mkdir, writeFile, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { binary, workspace, runtimeDir, root, origin, traceDataDir, icodeBinarySource, icodeBinaryNotes, selectICode } from './config.js';
+import { binary, workspace, runtimeDir, root, origin, icodeBinarySource, icodeBinaryNotes, selectICode } from './config.js';
 import { atomicJson, atomicText } from './store.js';
 import { nativeSkillEnvironment } from './native-skill-reader.js';
-import { nativeTraceRuntime } from './native-trace-runtime.js';
 import { ensureNativeTuiHooks } from './native-tui-hooks.js';
-import { nativeTraceEnvironment, checkNativeTraceReceiver, traceLaunchSettings } from '../scripts/native/tui-trace.mjs';
+import { withoutNativeTrace } from '../scripts/native/native-environment.mjs';
 import type { ProjectWorkPlan } from '../src/project-work.js';
 import type { DemoState } from '../src/domain.js';
 const execute = promisify(execFile);
 let launchBusy = false;
 const launched = new Map<string, { identity: string; result: Promise<unknown> }>();
 const terminalLauncher = createTerminalLauncher();
-const expectedTraceReceiver = () => process.env.DEMO_TRACE_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ? {} : {app:'teams-trace-server',workspaceRoot:root,stateRoot:traceDataDir};
 export const shellQuote = posixQuote;
 export async function installed(path: string) { try { await access(path, constants.X_OK); return true; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false; throw e; } }
 async function openCodePath() {
@@ -104,7 +102,7 @@ export function launch(tool: 'icode' | 'opencode', restore: boolean, requestId: 
     const directory=await nativeWorkspace();
     const args = tool === 'icode' ? ['-C', directory] : [directory];
     const terminal = await terminalPreferences.selected(expectedTerminal);
-    const launchedTerminal = await terminalLauncher.launch({ executable: entry, directory, args, terminal: terminal.id });
+    const launchedTerminal = await terminalLauncher.launch({ executable: tool === 'icode' ? process.execPath : entry, directory, args: tool === 'icode' ? [join(root, 'scripts/native/run-icode.mjs'), entry, ...args] : args, terminal: terminal.id });
     const receipt = { requestId, tool, restore, at: new Date().toISOString(), ...launchedTerminal, sessionId: null };
     await atomicJson(join(runtimeDir, 'last-launch.json'), receipt); return receipt;
   })().finally(() => { launchBusy = false; });
@@ -129,10 +127,7 @@ export async function nativeWorkDefaults(): Promise<(Omit<ProjectWorkPlan['insta
   const matches = models.models.filter((model: any) => model.id === selector || model.name === selector);
   if (matches.length !== 1) throw new Error('iCode 默认角色的模型配置无效');
   const preference = await terminalPreferences.context();
-  const trace = nativeTraceEnvironment(process.env, { projectId: 'pending' });
-  const traceStatus: NonNullable<ProjectWorkPlan['instance']['trace']> = { endpoint:trace.endpoint,enabled:trace.enabled,sensitiveData:trace.sensitiveData, readiness: trace.enabled && process.env.DEMO_NATIVE_DISABLED !== '1' ? 'unavailable' : 'disabled', diagnostic: process.env.DEMO_NATIVE_DISABLED === '1' ? '此验证实例未开放原生启动' : trace.enabled ? '' : '按本机显式配置关闭 trace' };
-  if (trace.enabled && process.env.DEMO_NATIVE_DISABLED !== '1') try { await nativeTraceRuntime(); await checkNativeTraceReceiver(trace.endpoint, expectedTraceReceiver()); traceStatus.readiness = 'ready'; traceStatus.diagnostic = '接收端已就绪；实际轨迹以接收记录为准'; } catch (error) { traceStatus.diagnostic = '本机 trace 接收端未就绪：' + (error as Error).message; }
-  return { trace: traceStatus, agent: role.id, agentLabel: role.displayName, model: matches[0].id, modelLabel: matches[0].name, terminal: { id: preference.selectedTerminal, name: preference.terminalName, error: preference.terminalError } };
+  return { agent: role.id, agentLabel: role.displayName, model: matches[0].id, modelLabel: matches[0].name, terminal: { id: preference.selectedTerminal, name: preference.terminalName, error: preference.terminalError } };
 }
 export async function startNativeWork(input: { directory: string; agent: string; model: string; sessionId?: string; instruction: string; terminal: string; task?: { runId: string; path: string; scope: { projectId: string; taskId: string; nodeId: string }; preparedSession?: { preparationRunId: string; sourceRunId: string; sessionSha256: string; sessionId: string } } }) {
   if (process.env.DEMO_NATIVE_DISABLED === '1') throw new Error('此验证实例未开放真实原生启动');
@@ -142,13 +137,10 @@ export async function startNativeWork(input: { directory: string; agent: string;
   if (input.task) {
     if (!/^[0-9a-f-]{36}$/i.test(input.task.runId) || input.sessionId && input.task.preparedSession?.sessionId !== input.sessionId) throw new Error('当前任务只允许新会话或已核验的同任务准备会话');
     const output = join(runtimeDir, 'work-contexts', input.task.runId + '.native');
-    const trace = nativeTraceEnvironment(process.env, { ...input.task.scope, runId: input.task.runId });
-    const traceRuntime = trace.enabled ? await nativeTraceRuntime() : undefined;
-    if (trace.enabled) await checkNativeTraceReceiver(trace.endpoint, expectedTraceReceiver());
     await mkdir(output, { recursive: true });
     const manifest = join(output, 'manifest.json');
-    await atomicJson(manifest, { version: 1, executionMode: 'interactive', runId: input.task.runId, scope: input.task.scope, executable: entry, directory: input.directory, agent: input.agent, model: input.model, ...(input.task.preparedSession?{preparedSession:input.task.preparedSession}:{}), trace: {...traceLaunchSettings(trace),...expectedTraceReceiver(),runtime:traceRuntime}, taskFile: input.task.path, taskSha256: createHash('sha256').update(await readFile(input.task.path)).digest('hex') });
-    const nativeEnvironment = traceRuntime ?? await nativeSkillEnvironment();
+    await atomicJson(manifest, { version: 1, executionMode: 'interactive', runId: input.task.runId, scope: input.task.scope, executable: entry, directory: input.directory, agent: input.agent, model: input.model, ...(input.task.preparedSession?{preparedSession:input.task.preparedSession}:{}), taskFile: input.task.path, taskSha256: createHash('sha256').update(await readFile(input.task.path)).digest('hex') });
+    const nativeEnvironment = await nativeSkillEnvironment();
     await ensureNativeTuiHooks(join(root, 'scripts/native/tui-work-hook.mjs'), join(runtimeDir, 'native-hook-backups'), nativeEnvironment.configDirectory, join(root, '..', 'demo', 'scripts/native/tui-work-hook.mjs'));
     const terminal = await terminalPreferences.selected(input.terminal);
     const receipt = await terminalLauncher.launch({ executable: process.execPath, directory: input.directory, args: [join(root, 'scripts/native/run-project-tui.mjs'), manifest], instruction: input.sessionId ? '恢复当前任务已准备的 iCode 会话；保留阅读背景与待确认问题，等待你继续交互。' : '进入 iCode 交互界面；输入工作指令后，当前任务节点上下文将通过原生 Hook 附带。', terminal: terminal.id });
@@ -157,7 +149,7 @@ export async function startNativeWork(input: { directory: string; agent: string;
   }
   const args = ['-C', input.directory, '--agent', input.agent, '--model', input.model, ...(input.sessionId ? ['--session', input.sessionId] : [])];
   const terminal = await terminalPreferences.selected(input.terminal);
-  return terminalLauncher.launch({ executable: entry, directory: input.directory, args, instruction: input.instruction, terminal: terminal.id });
+  return terminalLauncher.launch({ executable: process.execPath, directory: input.directory, args: [join(root, 'scripts/native/run-icode.mjs'), entry, ...args], instruction: input.instruction, terminal: terminal.id });
 }
 
 /** Explicit non-interactive work: no terminal and no implicit task advancement. */
@@ -168,16 +160,13 @@ export async function startNativeCliWork(input: Omit<Parameters<typeof startNati
   const entry=selection.path;
   if(!input.task||!/^[0-9a-f-]{36}$/i.test(input.task.runId)||!input.task.preparedSession||input.sessionId!==input.task.preparedSession.sessionId)throw new Error('CLI 工作必须恢复当前任务已核验的准备会话');
   const output=join(runtimeDir,'work-contexts',input.task.runId+'.native');
-  const trace=nativeTraceEnvironment(process.env,{...input.task.scope,runId:input.task.runId});
-  const traceRuntime=trace.enabled?await nativeTraceRuntime():undefined;
-  if(trace.enabled)await checkNativeTraceReceiver(trace.endpoint,expectedTraceReceiver());
   await mkdir(output,{recursive:true});
   const manifest=join(output,'manifest.json');
-  await atomicJson(manifest,{version:1,executionMode:'task-file',runId:input.task.runId,scope:input.task.scope,executable:entry,directory:input.directory,agent:input.agent,model:input.model,preparedSession:input.task.preparedSession,trace:{...traceLaunchSettings(trace),...expectedTraceReceiver(),runtime:traceRuntime},taskFile:input.task.path,taskSha256:createHash('sha256').update(await readFile(input.task.path)).digest('hex')});
+  await atomicJson(manifest,{version:1,executionMode:'task-file',runId:input.task.runId,scope:input.task.scope,executable:entry,directory:input.directory,agent:input.agent,model:input.model,preparedSession:input.task.preparedSession,taskFile:input.task.path,taskSha256:createHash('sha256').update(await readFile(input.task.path)).digest('hex')});
   const out=await open(join(output,'observer-output.log'),'wx',0o600);let err:Awaited<ReturnType<typeof open>>|undefined;
   try {
     err=await open(join(output,'observer-error.log'),'wx',0o600);
-    const child=spawn(process.execPath,[join(root,'scripts/native/run-project-task.mjs'),manifest],{cwd:input.directory,env:trace.env,detached:true,windowsHide:true,stdio:['ignore',out.fd,err.fd]});
+    const child=spawn(process.execPath,[join(root,'scripts/native/run-project-task.mjs'),manifest],{cwd:input.directory,env:withoutNativeTrace(process.env),detached:true,windowsHide:true,stdio:['ignore',out.fd,err.fd]});
     await new Promise<void>((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
     await atomicJson(join(output,'cli-launch.json'),{runId:input.task.runId,...input.task.scope,pid:child.pid,startedAt:new Date().toISOString()});child.unref();
     return {status:'cli-requested',pid:child.pid};

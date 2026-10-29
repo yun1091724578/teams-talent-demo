@@ -17,4 +17,4 @@ export function teamsPages(role: Role): PageDefinition[] {
     { id: 'connections', route: 'connections', title: '企业连接', groupId: 'team', icon: 'appstore' },
     ...common.slice(4)];
 }
-export const isOwnerPage = (path: string) => ['connections', 'organization', 'trace-monitor', 'talent'].includes(path);
+export const isOwnerPage = (path: string) => ['connections', 'organization', 'talent'].includes(path);

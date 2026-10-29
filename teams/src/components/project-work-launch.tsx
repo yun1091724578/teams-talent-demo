@@ -48,7 +48,6 @@ function WorkResult({ plan, receipt, done, newWork, inspect, check, prepared = f
         { key: 'session', label: '会话 ID', children: receipt.sessionId ?? '等待原生会话记录确认' },
         { key: 'directory', label: '工作目录', children: receipt.directory },
         { key: 'context', label: '上下文文件', children: receipt.contextPath },
-        ...(receipt.trace ? [{key:'trace',label:'Trace',children:receipt.trace.diagnostic+' · '+receipt.trace.endpoint}] : []),
       ]} />
       <p className="muted">{displayText(receipt.note)}</p>
       <Typography.Paragraph className="project-work-instruction" copyable={{ text: receipt.instruction, tooltips: ['复制指令', '已复制'] }}>{receipt.instruction}</Typography.Paragraph>
@@ -110,7 +109,7 @@ function PreparationConfirmation({ target, title, preparation, alreadyRequested,
   useEffect(() => { let active = true; setPlan(undefined); setError(''); void getProjectWork(role, JSON.parse(targetKey)).then(value => { if (active) setPlan(value); }).catch(cause => { if (active) setError(cause.message); }); return () => { active = false; }; }, [role, targetKey, reload]);
   const ongoing = !!preparation && ['importing', 'preparing-session'].includes(preparation.status);
   const pendingWork = requestPending(plan?.previous);
-  const configReason = !plan ? undefined : !plan.instance.installed ? '尚未安装 iCode，请先检查工具配置。' : !plan.instance.agent || !plan.instance.model ? '请先配置 iCode 的 Agent 与模型。' : plan.instance.terminal?.error ?? (plan.instance.trace?.readiness === 'unavailable' ? plan.instance.trace.diagnostic : undefined);
+  const configReason = !plan ? undefined : !plan.instance.installed ? '尚未安装 iCode，请先检查工具配置。' : !plan.instance.agent || !plan.instance.model ? '请先配置 iCode 的 Agent 与模型。' : plan.instance.terminal?.error;
   const cannotRetry = !!preparation && ['failed', 'waiting-directory'].includes(preparation.status) && !preparation.retryable;
   const start = async () => {
     if (pending.current || !plan || configReason || !plan.directory.valid || pendingWork || cannotRetry) return;
@@ -185,7 +184,6 @@ function ProjectWorkDialog({ target, close, configureOnly = false, completed, re
           { key: 'source', label: '资料来源', children: displayText(plan.source) },
           { key: 'context', label: '上下文说明', children: displayText(plan.context.summary) },
           { key: 'version', label: '采用版本', children: displayText(plan.context.versions) },
-          ...(plan.instance.trace ? [{key:'trace',label:'Trace',children:plan.instance.trace.diagnostic+' · '+plan.instance.trace.endpoint}] : []),
           ...(action !== 'new' && plan.history ? [{ key: 'session', label: '会话 ID', children: plan.history.sessionId }] : []),
           ...(plan.previous ? [{ key: 'previous', label: '上次请求', children: requestTime(plan.previous.at) + ' · ' + (requestPending(plan.previous) ? '结果待核对' : plan.previous.status === 'terminal-focused' ? '已打开终端' : '请求已提交') }] : []),
         ]} />{plan.previous && <><p className="muted">{displayText(plan.previous.note)}</p><Button type="link" onClick={() => showText('上次工作入口', JSON.stringify(plan.previous, null, 2))}>查看上次请求</Button></>}</> }]} />

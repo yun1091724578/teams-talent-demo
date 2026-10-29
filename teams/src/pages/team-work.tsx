@@ -1,6 +1,6 @@
 import { displayText, displayRequirementId } from '../display-text.js';
 import { useMemo, useState } from 'react';
-import { Button, Checkbox, Descriptions, Drawer, Empty, Form, Input, Modal, Segmented, Select, Space, Table, Tabs, Tag } from 'antd';
+import { Button, Checkbox, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
 import { TeamsPageIntro } from '../components/teams-reuse.js';
 import { useDemo } from '../context.js';
 import { FrameworkCard } from '../vendor/teams/components/page-layout.js';
@@ -11,7 +11,6 @@ import { TaskSessions } from '../components/task-sessions.js';
 import { CollaborationProgress } from '../components/collaboration-progress.js';
 import { TaskSessionActivity } from '../components/task-session-activity.js';
 import { canLinkTaskSession, type CollectedSession, type TaskScope } from '../task-automation.js';
-import { TraceMonitor, type TraceMonitorRoute } from './trace-monitor.js';
 import '../operations.css';
 
 const colors: Partial<Record<Presence, string>> = { '执行中': 'green', '等待人工处理': 'gold', '在线空闲': 'blue' };
@@ -50,11 +49,10 @@ export function TeamWork() {
   const [reportForm] = Form.useForm();
   const params = new URLSearchParams(location.hash.split('?')[1] ?? ''), requestedTab = params.get('tab');
   const activeTab = requestedTab === 'sessions' || (requestedTab === 'members' && role === 'owner') ? requestedTab : 'tasks';
-  const sessionView = activeTab === 'sessions' && role === 'owner' && params.get('view') === 'traces' ? 'traces' : 'conversations';
-  const changeRoute = (tab: string, view?: string) => {
+  const changeRoute = (tab: string) => {
     const next = new URLSearchParams(params);
     if (tab === 'tasks') next.delete('tab'); else next.set('tab', tab);
-    if (tab === 'sessions') next.set('view', role === 'owner' && view === 'traces' ? 'traces' : 'conversations'); else next.delete('view');
+    next.delete('view'); next.delete('traceProject'); next.delete('traceSession'); next.delete('trace');
     const query = next.toString(); navigate('team-work' + (query ? '?' + query : ''));
   };
   const entries = useMemo(() => teamWorkIndex(state, data, role).filter(entry => (includeSnapshots || entry.projectId !== 'teams') && (role === 'owner' || entry.item.assigneeId === role)), [state, data, role, includeSnapshots]);
@@ -80,17 +78,8 @@ export function TeamWork() {
     const first = reportable[0]; if (!first) return;
     setReportTaskId(first.id); reportForm.resetFields(); reportForm.setFieldsValue({ task: first.id, nodeId: reportNodes(first)[0], tool: 'icode', sessionId: '' }); setReportOpen(true);
   };
-  const traceProjectId = params.get('traceProject') ?? selectedSession?.entry.scope.projectId ?? (project === 'all' ? undefined : project);
-  const traceSessionId = params.get('traceSession') ?? selectedSession?.sessionId, traceId = params.get('trace');
-  const selectTrace = (route: TraceMonitorRoute) => {
-    const next = new URLSearchParams(params); next.set('tab', 'sessions'); next.set('view', 'traces');
-    if (route.projectId) next.set('traceProject', route.projectId); else next.delete('traceProject');
-    if (route.sessionId) next.set('traceSession', route.sessionId); else next.delete('traceSession');
-    if (route.traceId) next.set('trace', route.traceId); else next.delete('trace');
-    navigate('team-work?' + next.toString());
-  };
   const filters = <div className="team-work-filters"><Space wrap><Select aria-label="筛选追溯项目" value={project} onChange={setProject} options={[{ value: 'all', label: '全部项目' }, ...projects.map(([value, label]) => ({ value, label }))]} /><Select aria-label="筛选交付人" value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部交付人' }, ...owners.map(value => ({ value, label: entries.find(entry => entry.item.owner === value)?.projectId === 'teams' ? '快照责任人 · ' + value : value }))]} /><Select aria-label="筛选交付阶段" value={phase} onChange={setPhase} options={[{ value: 'all', label: '全部阶段' }, ...(['待开展', '准备', '开发', '验证', '待验收', '已交付'] as const).map(value => ({ value, label: requirementPhaseLabel(value) }))]} />{role === 'owner' && <Checkbox checked={includeSnapshots} onChange={event => { setIncludeSnapshots(event.target.checked); if (!event.target.checked) { setProject('all'); setOwner('all'); } }}>显示导入快照</Checkbox>}</Space><span>{visible.length} / {entries.length} 项任务</span></div>;
-  return <div className="page-stack team-work-page"><TeamsPageIntro actions={<Tag>{entries.length} 项任务</Tag>}>统一查看任务交付、原生会话与 OTLP 调用轨迹；导入快照按需展开并独立标识。</TeamsPageIntro>
+  return <div className="page-stack team-work-page"><TeamsPageIntro actions={<Tag>{entries.length} 项任务</Tag>}>统一查看任务交付进展和原生会话内容；导入快照按需展开并独立标识。</TeamsPageIntro>
     <Tabs activeKey={activeTab} onChange={value => changeRoute(value)} items={[
       { key: 'tasks', label: '任务作业', children: <>{filters}<FrameworkCard title="跨任务作业索引"><Table<TeamWorkEntry> rowKey="id" size="middle" pagination={false} scroll={{ x: 1120 }} dataSource={visible} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选没有任务作业" /> }} columns={[
         { title: '项目 / 需求', width: 270, render: (_, entry) => <div className="team-work-cell"><strong>{entry.projectName}</strong><span>{displayText(entry.item.source.title)}</span><small>{displayRequirementId(entry.scope.taskId)}</small></div> },
@@ -101,9 +90,9 @@ export function TeamWork() {
         { title: '来源', width: 155, render: (_, entry) => <SourceTags entry={entry} /> },
         { title: '操作', width: 95, render: (_, entry) => <Button type="link" size="small" onClick={() => setSelected(entry)}>查看详情</Button> },
       ]} /></FrameworkCard></> },
-      { key: 'sessions', label: '会话与轨迹', children: <div className="team-work-session-view">
-        <div className="team-work-session-toolbar"><Space wrap><Button aria-label="上报任务会话" onClick={openReport} disabled={!reportable.length} title={reportable.length ? '关联本机已有会话并查看正文' : '当前筛选中没有可由你上报的进行中任务'}>上报会话</Button><Segmented aria-label="切换会话与轨迹视图" value={sessionView} onChange={value => changeRoute('sessions', String(value))} options={[{ value: 'conversations', label: '任务会话' }, ...(role === 'owner' ? [{ value: 'traces', label: '调用 Trace' }] : [])]} /></Space><span>{sessionView === 'traces' ? '按实际上报项目查看 OTLP 调用链；不代表任务业务进度。' : '选择原生会话读取真实对话；OTLP 调用链独立核验。'}</span></div>
-        <div className="team-work-conversation-view" hidden={sessionView !== 'conversations'}>{filters}<div className="team-work-conversation-layout">
+      { key: 'sessions', label: '任务会话', children: <div className="team-work-session-view">
+        <div className="team-work-session-toolbar"><Space wrap><Button aria-label="上报任务会话" onClick={openReport} disabled={!reportable.length} title={reportable.length ? '关联本机已有会话并查看正文' : '当前筛选中没有可由你上报的进行中任务'}>上报会话</Button></Space><span>选择会话查看用户输入与模型回复。</span></div>
+        <div className="team-work-conversation-view">{filters}<div className="team-work-conversation-layout">
           <FrameworkCard title="任务会话" action={<Tag>{sessionRows.length} 个</Tag>}><div className="team-work-session-list">{sessionRows.length ? sessionRows.map(row => <button type="button" key={row.id} data-conversation-session={row.sessionId} aria-pressed={selectedSession?.id === row.id} className={'team-work-session-item' + (selectedSession?.id === row.id ? ' selected' : '')} onClick={() => selectConversation(row)}>
             <span className="team-work-session-item-heading"><Tag>{row.tool}</Tag><strong>{displayText(row.entry.item.source.title)}</strong></span>
             <small>{row.entry.projectName} · {displayRequirementId(row.entry.scope.taskId)}</small><code title={row.sessionId}>{row.sessionId}</code>
@@ -111,10 +100,9 @@ export function TeamWork() {
           </button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选没有任务会话" />}</div></FrameworkCard>
           <FrameworkCard title="真实对话正文" action={selectedSession ? <Tag>{conversationNodeLabels[selectedNode]}</Tag> : undefined}>{selectedSession ? <>
             <div className="team-work-conversation-context"><div><strong>{displayText(selectedSession.entry.item.source.title)}</strong><span>{selectedSession.entry.projectName} · {displayRequirementId(selectedSession.entry.scope.taskId)}</span><code title={selectedSession.sessionId}>{selectedSession.tool} · {selectedSession.sessionId}</code></div><Select aria-label="选择会话节点" value={selectedNode} onChange={node => selectConversation(selectedSession, node)} options={selectedSession.nodeIds.map(node => ({ value: node, label: node === 'verify' ? '测试验证' : '功能开发' }))} /></div>
-            {activeTab === 'sessions' && sessionView === 'conversations' && <TaskSessionActivity key={selectedSession.id + ':' + selectedNode} projectId={selectedSession.entry.scope.projectId} taskId={selectedSession.entry.scope.taskId} nodeId={selectedNode} sessionId={selectedSession.sessionId} showSessionSelector={false} readonlySource={selectedSession.entry.projectId === 'teams'} />}
+            {activeTab === 'sessions' && <TaskSessionActivity key={selectedSession.id + ':' + selectedNode} projectId={selectedSession.entry.scope.projectId} taskId={selectedSession.entry.scope.taskId} nodeId={selectedNode} sessionId={selectedSession.sessionId} showSessionSelector={false} readonlySource={selectedSession.entry.projectId === 'teams'} />}
           </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={requestedSession ? '所选会话不在当前筛选范围或已不可用' : sessionRows.length ? '选择左侧会话查看真实对话正文' : '当前筛选没有可读取的原生会话'} />}</FrameworkCard>
         </div></div>
-        {sessionView === 'traces' && <div className="team-work-trace-shell" data-trace-view="otlp"><TraceMonitor projectId={traceProjectId} sessionId={traceSessionId} traceId={traceId} onRouteChange={selectTrace} /></div>}
       </div> },
       ...(role === 'owner' ? [{ key: 'members', label: '成员运行概览', children: <FrameworkCard title="成员与执行实例" action={<Tag>运营样例</Tag>}><MemberUsageTable /><p className="muted">展开成员行可查看实例。此处不用于跨成员实时状态或交付追溯；本机实际状态请在 Agent 管理中核验。</p></FrameworkCard> }] : []),
     ]} />

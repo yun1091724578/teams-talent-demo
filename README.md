@@ -16,20 +16,14 @@
 ```sh
 git clone https://github.com/zhuyuloveai/teams-talent-demo.git
 cd teams-talent-demo
-npm run setup      # 两个项目及 Teams 内嵌的 trace-monitor 各自 npm ci
+npm run setup      # Teams 与 Talents 各自 npm ci
 npm run dev        # 构建并同时启动两边，Ctrl+C 一起停止
 ```
 
 - 后台启停：`npm start` / `npm stop`（macOS 也可双击 `启动演示.command` / `停止演示.command`，Windows 用 `start-demo.cmd`）。
 - 单独启动：`cd teams && npm run dev`，或 `cd talents && npm run dev`。另一边没启动时，读取 `shared/seed/` 中提交的初始数据。
 
-「开发会话轨迹」页面另需 Python 3.10+：Teams 启动时会拉起 `teams/trace-server`（默认端口 8012）。首次运行前安装依赖：
-
-```sh
-python3 -m pip install -r teams/trace-server/requirements.txt
-```
-
-Python 不是 `python3`（Windows 为 `python`）时，用 `DEMO_TRACE_PYTHON` 指定。缺少 Python 或依赖时轨迹页面不可用，要求开启 trace 的 iCode 新作业会显示诊断。
+任务追溯保留 CLI 进度与原生会话正文。Teams 启动的 iCode 不再启用 OTLP Trace，无需安装 Trace 服务或 exporter。
 
 服务仅监听本机。Teams 的配置见 [快速启动](teams/docs/quick-start.md)，Talents 见 [talents/README.md](talents/README.md)。
 
