@@ -1,4 +1,5 @@
 import type { TrajectoryHealth } from './trajectory-health.js';
+import type { TaskWorkspace } from './task-workspace.js';
 export interface ProjectWorkSelection {
   projectId: string;
   tab: string;
@@ -35,7 +36,8 @@ export interface ProjectWorkPlan {
   source: string;
   planToken: string;
   instance: { binary?:string; terminal?: { id: string; name: string; error?: string }; installed: boolean; name: string; agent?: string; agentLabel?: string; model?: string; modelLabel?: string };
-  directory: { root: string | null; valid: boolean; kind: 'imported-snapshot' | 'git-binding'; diagnostic: string };
+  directory: { root: string | null; valid: boolean; kind: 'imported-snapshot' | 'git-binding' | 'task-workspace'; diagnostic: string };
+  workspace?: TaskWorkspace;
   history?: { sessionId: string; directory: string; title: string; available: boolean; diagnostic?: string; prepared?: { preparationRunId: string; sourceRunId: string; sessionSha256: string }; configuration?: {agent: string; agentLabel: string; model: string; modelLabel: string}; trajectory?: TrajectoryHealth; active: { pid: number; application: string | null; tty: string; terminal?: { id: string; kind?: string; title: string; directory: string }; diagnostic?: string } | null };
   context: { frozen: boolean; summary: string; versions: string; selectedSkills: string[]; assets: Array<{ title: string; location: string }> };
   actions: Array<{ id: ProjectWorkAction; label: string; enabled: boolean; reason?: string }>;

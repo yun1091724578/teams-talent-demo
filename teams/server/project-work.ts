@@ -26,6 +26,7 @@ import { nativeProcessActive, inspectNativeProcess } from '../scripts/native/ses
 import { focusWorkTerminal } from './terminal-focus.js';
 import { nativeWorkExecution } from './native-work-status.js';
 import { readTrajectoryHealth } from './trajectory-health.js';
+import { readTaskWorkspace, prepareTaskWorkspace } from './task-workspace.js';
 
 const execute = promisify(execFile);
 const nodeNames: Record<string, string> = { prepare: '需求澄清', develop: '开发', verify: '验证', accept: '验收' };
@@ -242,8 +243,9 @@ export class ProjectWorkService {
     if(!['tui','cli'].includes(mode))throw new DomainError('作业模式无效',400);
     const state = this.current(), work = resolveProjectWork(state, this.data, input);
     const requirement = deliveryRequirement(state, work.target.projectId, work.target.taskId);
-    let directory: ProjectWorkPlan['directory'];
+    let directory: ProjectWorkPlan['directory'], taskWorkspace: Awaited<ReturnType<typeof readTaskWorkspace>> = null;
     const preparedDirectory=requirement?taskAutomation(state,{projectId:requirement.projectId,taskId:requirement.id})?.preparation?.session?.directory:undefined;
+    if(requirement){taskWorkspace=await readTaskWorkspace(this.directory,{projectId:requirement.projectId,taskId:requirement.id});if(requirement.workDirectory)taskWorkspace=null;}
     if (requirement) {
       directory={root:preparedDirectory??requirement.workDirectory??null,valid:false,kind:'git-binding',diagnostic:'尚未配置项目工作区，请在项目概览设置独立仓库路径。'};
       try {
@@ -254,14 +256,22 @@ export class ProjectWorkService {
           const binding=await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo);
           if(binding&&binding.directory!==directory.root)throw new Error('任务工作区与已准备会话目录不同；请核对原会话，不自动迁移');
           directory.valid=true;directory.diagnostic='保留已准备会话的原工作目录。';
+          if(taskWorkspace&&taskWorkspace.directory!==directory.root)taskWorkspace=null;
         } else {
-          const selected=await taskWorkDirectory(this.directory,requirement,this.workspaceRepo);
-          const worktree=await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo);
-          if(worktree){directory.root=worktree.directory;directory.valid=true;directory.diagnostic=`已核验任务工作区 ${worktree.branch}，PR 目标 ${worktree.baseBranch}；在独立任务工作目录中工作。`;}
-          else if(selected){const configured=await configuredProjectWorkspace(this.directory,work.target.projectId);if(configured&&!requirement.workDirectory)await verifyProjectWorkspace(configured);directory.root=await inspectDirectory(selected,selected,this.data.baseline.sourceRoot);directory.valid=true;directory.diagnostic='本需求工作目录与 Git 根目录已核验。';}
-          else {
-            const bindings=await this.bindings(),binding=bindings[directoryActorId+':'+work.target.projectId]??bindings['owner:'+work.target.projectId];
-            if(binding){const repository=work.target.projectId==='teams'?'github.com/SEAL-iCode/iCode-teams':work.target.projectId==='carddemo'?binding:state.workspace.projects?.find(project=>project.id===work.target.projectId)?.remoteUrl??'';directory.root=await inspectDirectory(binding,repository,this.data.baseline.sourceRoot);directory.valid=true;directory.diagnostic='使用当前项目已核验的本机目录。';}
+          if(taskWorkspace&&!requirement.workDirectory){
+            const root=await realpath(taskWorkspace.directory);
+            if(!(await stat(root)).isDirectory())throw new Error('已登记的任务工作目录不再可用');
+            taskWorkspace={...taskWorkspace,directory:root};
+            directory={root,valid:true,kind:'task-workspace',diagnostic:taskWorkspace.note};
+          } else {
+            const selected=await taskWorkDirectory(this.directory,requirement,this.workspaceRepo);
+            const worktree=await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo);
+            if(worktree){directory.root=worktree.directory;directory.valid=true;directory.diagnostic=`已核验任务工作区 ${worktree.branch}，PR 目标 ${worktree.baseBranch}；在独立任务工作目录中工作。`;}
+            else if(selected){const configured=await configuredProjectWorkspace(this.directory,work.target.projectId);if(configured&&!requirement.workDirectory)await verifyProjectWorkspace(configured);directory.root=await inspectDirectory(selected,selected,this.data.baseline.sourceRoot);directory.valid=true;directory.diagnostic='本需求工作目录与 Git 根目录已核验。';}
+            else {
+              const bindings=await this.bindings(),binding=bindings[directoryActorId+':'+work.target.projectId]??bindings['owner:'+work.target.projectId];
+              if(binding){const repository=work.target.projectId==='teams'?'github.com/SEAL-iCode/iCode-teams':work.target.projectId==='carddemo'?binding:state.workspace.projects?.find(project=>project.id===work.target.projectId)?.remoteUrl??'';directory.root=await inspectDirectory(binding,repository,this.data.baseline.sourceRoot);directory.valid=true;directory.diagnostic='使用当前项目已核验的本机目录。';}
+            }
           }
         }
       } catch(error){directory.valid=false;directory.diagnostic=(error as Error).message;}
@@ -290,12 +300,12 @@ export class ProjectWorkService {
     const preparationReason=preparation ? history ? history.available?undefined:history.diagnostic : preparation.error??(preparation.status==='waiting-directory'?'请先配置当前任务工作目录，再继续准备会话':preparation.status==='failed'?'会话准备未完成，请先重试准备':'知识与会话正在准备，请稍后进入') : undefined;
     const launchReason = !defaults ? '配套 iCode 未安装' : (mode==='tui'?defaults.terminal.error:undefined) ?? (!directory.valid ? directory.diagnostic : undefined);
     const cliReason=mode==='cli'?(!requirement||!['prepare','develop','verify'].includes(work.target.nodeId??'')?'CLI 工作需要明确的当前交付任务和节点':history?.active?'当前任务会话仍在运行；CLI 不会重复恢复，请等待原作业结束':!history?.prepared?'请先完成本任务知识与真实会话准备，再发起 CLI 工作':undefined):undefined;
-    const workspaceReason=requirement&&!preparedDirectory&&!requirement.workDirectory&&await configuredProjectWorkspace(this.directory,work.target.projectId)&&!await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo)?'请先准备需求会话，由准备流程创建独立任务工作区':undefined;
+    const workspaceReason=requirement&&!preparedDirectory&&!taskWorkspace&&!requirement.workDirectory&&await configuredProjectWorkspace(this.directory,work.target.projectId)&&!await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo)?'请先准备需求会话，由准备流程创建独立任务工作区':undefined;
     const reason = taskStartReason ?? workspaceReason ?? cliReason ?? preparationReason ?? (history?.active ? undefined : launchReason ?? knowledgeReason);
     const actions: ProjectWorkPlan['actions'] = [{ id: history?.active ? 'focus' : history ? 'resume' : 'new', label: history?.active ? '进入正在运行的会话' : history ? '进入已准备会话' : requirement ? '打开当前节点的 iCode 交互会话' : '新建当前工作的 iCode 会话', enabled: !reason, ...(reason ? { reason } : {}) }];
     // A fresh session is a deliberate fallback: never while another task session is live.
     if(history && !history.active && history.available)actions.push({id:'new',label:'新开会话（不保留当前对话）',enabled:!reason,...(reason?{reason}:{})});
-    const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary: (await selectICode()).path??binary, ...defaults }, directory, context, actions, defaultAction: 'new' };
+    const plan: ProjectWorkPlan = { executionMode: mode==='cli'?'task-file':'interactive', target: work.target, projectName: work.projectName, title: work.title, location: work.location, source: work.source, planToken: '', instance: { installed: !!defaults, name: '本机 iCode', binary: (await selectICode()).path??binary, ...defaults }, directory, ...(taskWorkspace ? { workspace: taskWorkspace } : {}), context, actions, defaultAction: 'new' };
     if(history){
       plan.history=history;
       const unfixable=history.trajectory?.state==='degraded'&&['corrupt_tail','schema_too_new','permission','unreadable','too_large'].includes(history.trajectory.reason??'');
@@ -306,13 +316,24 @@ export class ProjectWorkService {
     plan.planToken = hash({ role, plan: tokenPlan, revision: state.revision });
     plan.previous = await this.previous(work.target); return plan;
   }
-  bind(role: Role, input: ProjectWorkSelection, directory: string) {
-    const next = this.queue.then(() => this.bindDirectory(role, input, directory)); this.queue = next.catch(() => undefined); return next;
+  bind(role: Role, input: ProjectWorkSelection, directory: string, mode: 'auto' | 'directory' = 'auto') {
+    const next = this.queue.then(() => this.bindDirectory(role, input, directory, mode)); this.queue = next.catch(() => undefined); return next;
   }
-  private async bindDirectory(role: Role, input: ProjectWorkSelection, directory: string) {
+  private async bindDirectory(role: Role, input: ProjectWorkSelection, directory: string, mode: 'auto' | 'directory' = 'auto') {
     const work = resolveProjectWork(this.current(), this.data, input);
     const task=deliveryRequirement(this.current(),input.projectId,input.taskId);
-    const repository=task ? task.workDirectory ?? (input.projectId==='teams'?'github.com/SEAL-iCode/iCode-teams':input.projectId==='carddemo'?directory:this.current().workspace.projects?.find(project=>project.id===input.projectId)?.remoteUrl??'') : work.repository;
+    if(task){
+      if(role!=='owner'&&task.assigneeId!==role)throw new DomainError('仅当前交付人或 Owner 可以配置任务工作目录',403);
+      if(task.workDirectory)throw new DomainError('任务已有登记工作目录，不能更换；请保留原目录',409);
+      if(task.preparedAt||taskAutomation(this.current(),{projectId:task.projectId,taskId:task.id})?.preparation?.session)throw new DomainError('任务已准备会话，不能更换工作目录；请保留原会话',409);
+      if(await taskWorktreeBinding(this.directory,task,this.workspaceRepo))throw new DomainError('任务已有独立 Git 工作区，不能改为本机目录',409);
+      const project=input.projectId==='carddemo'?this.current().workspace.project:input.projectId==='teams'?this.data.teamsProject.project:this.current().workspace.projects?.find(project=>project.id===input.projectId);
+      if(!project)throw new DomainError('项目不存在',404);
+      const remoteUrl=project && 'remoteUrl' in project && typeof project.remoteUrl==='string' ? project.remoteUrl : undefined;
+      await prepareTaskWorkspace(this.directory,{projectId:task.projectId,taskId:task.id,directory,projectRemoteUrl:remoteUrl,sourceRoot:this.data.baseline.sourceRoot,mode});
+      return this.plan(role,input);
+    }
+    const repository = work.repository;
     const canonical = await inspectDirectory(directory, repository, this.data.baseline.sourceRoot);
     const bindings = await this.bindings(); bindings[role + ':' + input.projectId] = canonical;
     await atomicJson(join(this.directory, 'project-work-bindings.json'), bindings);
@@ -359,8 +380,9 @@ export class ProjectWorkService {
     const instruction = `首次开展业务时读取 Teams 协作 Skill：${collaborationSkillPath}。当前角色 ${role}，CLI 保留 --role ${role}；获取当前依据：${command}。该命令只打印保存回执，正文读取 ${contextJsonPath}。同版本已读材料不必每轮重读；切换节点按 Skill 获取新节点依据。`;
     const nativeSessionPath = join(this.directory, 'work-contexts', body.requestId + '.native', 'native-session.json');
     const binding = requirement ? await taskWorktreeBinding(this.directory,requirement,this.workspaceRepo) : null;
-    const gitBoundary=binding&&binding.directory===directory ? `已核验工作树分支 ${binding.branch}，remote ${binding.remote}，PR base ${binding.baseBranch}；仅目录 ${binding.directory} 内本任务变更可提交。提交前重新核对分支未变化。` : '当前会话没有已核验的独立 CardDemo 任务分支绑定，不授权提交或推送；需要交付 Git 成果时回传 blocked 并由开发者配置任务工作区。';
-    const taskInstructions = requirement ? `\n## 本次交互工作范围\n需求正文见结构化上下文 agreement.background；已确认事项与依据见 agreement.confirmations（准备节点同时列入 nodeContract 输入），未登记事项保持待确认，不得自行确认。本次进入时所选节点为 ${plan.target.nodeId}；这不是会话整个生命周期的固定节点。${mode==='cli'?'本次 CLI 下方工作指令是初始化只读轮之后开发者明确授权的工作轮；它结束初始化的等待，但不代替 prepare.confirmed 或任何业务门禁。只执行本次所选节点范围，完成后结束本轮；不自动切换或连跑其它节点。':'先等待开发者的工作指令，仅执行当前节点授权范围，不自动连跑。'}节点输入、产物与标准以 context.nodeContract 为准；CLI 协作步骤和参数按上述 Skill，不另设一份合同。\n\n${gitBoundary}\n实际代码仅可修改本次工作目录 ${directory}，不得修改 Teams/Talents 应用工程、原始参考资料、全局 iCode 设置、历史会话或其他任务。只有开发者已明确开始 develop、当前需求实现完成且必要范围单元测试实际通过后，才按协作 Skill 提交本任务变更、推送任务分支并创建或更新 PR，PR base 必须为 ${binding?.baseBranch??'未配置（不允许提交）'}，复用本任务已有分支/PR。只暂存当前任务允许路径或变更块，不用 git add .；不收其他任务或暂存区原有无关改动。回传真实 PR 链接和准确 commit/codeVersion。不得直接推 main/master 或交付基线 ${binding?.baseBranch??'未配置'}、合并 PR、部署或另行委派 agent。Git 仓库、remote、权限或混合改动边界不能核验时回传 blocked，不伪造 PR；初始化、prepare 或仅打开 TUI 不授权提交。\n\n原生会话身份读取 ${nativeSessionPath}，核对本任务与 runId=${body.requestId}。尚未出现时最多等 15 秒，仍无则报告并停止，不编造或借用历史 ID。开发者明确切节点时保留项目/任务/角色/run/session/tab，使用新 nodeId 获取 ready 输入并独立采用，不复用旧 adoptionId。最终停在待 Owner 验收，不直接改状态文件、绕过 CLI 写 API 或代替 Owner 验收。\n` : '';
+    const gitBoundary=binding&&binding.directory===directory ? `已核验工作树分支 ${binding.branch}，remote ${binding.remote}，PR base ${binding.baseBranch}；仅目录 ${binding.directory} 内本任务变更可提交。提交前重新核对分支未变化。` : plan.workspace?.mode==='git' ? `已登记任务本地 Git 工作区 ${plan.workspace.directory}；基线 ${plan.workspace.baseBranch??'未登记'}${plan.workspace.baseCommit?'@'+plan.workspace.baseCommit.slice(0,12):''}；${plan.workspace.localOnly?'未配置可核验远程，只允许本地提交，禁止推送或创建远程 PR':'origin 已核验，可按任务分支提交并创建 PR'}。仅此目录内本任务变更可提交。` : plan.workspace?.mode==='directory' ? `已登记任务普通目录 ${plan.workspace.directory}；本任务不使用 Git，禁止声称 commit、codeVersion 或远程 PR。` : '当前会话没有已核验的独立任务分支绑定，不授权提交或推送；需要交付 Git 成果时回传 blocked 并由开发者配置任务工作区。';
+    const deliveryBoundary=plan.workspace?.mode==='directory' ? '本任务使用普通目录：不得声称 commit/codeVersion/远程 PR；如节点门禁要求 codeVersion，回传 blocked 并说明本地目录模式，不能伪造。' : plan.workspace?.localOnly ? '本任务使用本地 Git 工作区：允许本地提交并回传真实 commit hash，但不得推送、创建 PR 或声称远程交付已成功。' : '';
+    const taskInstructions = requirement ? `\n## 本次交互工作范围\n需求正文见结构化上下文 agreement.background；已确认事项与依据见 agreement.confirmations（准备节点同时列入 nodeContract 输入），未登记事项保持待确认，不得自行确认。本次进入时所选节点为 ${plan.target.nodeId}；这不是会话整个生命周期的固定节点。${mode==='cli'?'本次 CLI 下方工作指令是初始化只读轮之后开发者明确授权的工作轮；它结束初始化的等待，但不代替 prepare.confirmed 或任何业务门禁。只执行本次所选节点范围，完成后结束本轮；不自动切换或连跑其它节点。':'先等待开发者的工作指令，仅执行当前节点授权范围，不自动连跑。'}节点输入、产物与标准以 context.nodeContract 为准；CLI 协作步骤和参数按上述 Skill，不另设一份合同。\n\n${gitBoundary}\n实际代码仅可修改本次工作目录 ${directory}，不得修改 Teams/Talents 应用工程、原始参考资料、全局 iCode 设置、历史会话或其他任务。只有开发者已明确开始 develop、当前需求实现完成且必要范围单元测试实际通过后，才按协作 Skill 提交本任务变更、推送任务分支并创建或更新 PR，PR base 必须为 ${binding?.baseBranch??'未配置（不允许提交）'}，复用本任务已有分支/PR。只暂存当前任务允许路径或变更块，不用 git add .；不收其他任务或暂存区原有无关改动。回传真实 PR 链接和准确 commit/codeVersion。不得直接推 main/master 或交付基线 ${binding?.baseBranch??'未配置'}、合并 PR、部署或另行委派 agent。Git 仓库、remote、权限或混合改动边界不能核验时回传 blocked，不伪造 PR；初始化、prepare 或仅打开 TUI 不授权提交。\n\n原生会话身份读取 ${nativeSessionPath}，核对本任务与 runId=${body.requestId}。尚未出现时最多等 15 秒，仍无则报告并停止，不编造或借用历史 ID。开发者明确切节点时保留项目/任务/角色/run/session/tab，使用新 nodeId 获取 ready 输入并独立采用，不复用旧 adoptionId。最终停在待 Owner 验收，不直接改状态文件、绕过 CLI 写 API 或代替 Owner 验收。${deliveryBoundary ? '\n\n' + deliveryBoundary : ''}\n` : '';
     const content = `# ${plan.projectName} · ${plan.title}\n\n工作位置：${plan.location}\n来源：${plan.source}\n\n${plan.context.summary}\n采用版本：${plan.context.versions}\n\n## 工作标识\n${JSON.stringify({ ...plan.target, role, runId: body.requestId, sessionId: body.action === 'new' ? null : plan.history!.sessionId }, null, 2)}\n\n## 项目资料与选择\n${JSON.stringify({...plan.context,selectedSkills:context.skills.map(skill=>skill.id)}, null, 2)}\n\n## 开始工作时读取\n${instruction}\n\n准备时读取的结构化上下文：${contextJsonPath}\n${taskInstructions}${mode==='cli'?`\n## 本次开发者工作指令\n${body.instruction!.trim()}\n`:''}\n本文件由 Teams 导出。提供入口不代表 iCode 已读取、采用或完成工作。\n`;
     await atomicText(contextPath, content);
     const receipt: ProjectWorkReceipt = { executionMode: plan.executionMode, requestId: body.requestId, target: plan.target, action: body.action, status: 'prepared', at: new Date().toISOString(), directory, sessionId: body.action === 'new' ? null : plan.history!.sessionId, contextPath, instruction, note: '启动请求已准备；尚未观察到原生会话。' };

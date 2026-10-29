@@ -6,11 +6,14 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readLegacyTaskBinding,type LegacyTaskWorktree} from '../../scripts/lib/legacy-task-workspace.mjs';
 import {configuredProjectWorkspace, readProjectTaskBinding, ensureProjectTaskWorkspace} from './project-workspaces.js';
+import {readTaskWorkspace} from './task-workspace.js';
 import type {ProjectTaskWorktree} from '../src/project-workspace.js';
 const platformRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../..'),exec=promisify(execFile);
 type TaskDirectory={projectId:string;id:string;workDirectory?:string};
 export const taskWorktreeBinding=async(runtime:string,task:TaskDirectory,repo=platformRoot):Promise<LegacyTaskWorktree|ProjectTaskWorktree|null>=>await readProjectTaskBinding(runtime,task)??await readLegacyTaskBinding(repo,runtime,task);
 export async function ensureTaskWorkspace(runtime:string,scope:{projectId:string;taskId:string},preparationId:string,repo=platformRoot) {
+  // A task-local workspace is an explicit fallback for projects without a verified worktree.
+  const taskWorkspace=await readTaskWorkspace(runtime,scope);if(taskWorkspace)return taskWorkspace;
   if(!await configuredProjectWorkspace(runtime,scope.projectId))return null;
   const state=JSON.parse(await readFile(join(runtime,'state.json'),'utf8'));
   const task=state.workspace?.deliveryRequirements?.find((item:TaskDirectory)=>item.id===scope.taskId&&item.projectId===scope.projectId);
@@ -21,6 +24,7 @@ export async function ensureTaskWorkspace(runtime:string,scope:{projectId:string
 }
 /** Explicit task binding. Current worktree identity is checked without rewriting historical task/session evidence. */
 export async function taskWorkDirectory(runtime:string,task:TaskDirectory,repo=platformRoot,_requireWorkspace=true) {
+  const taskWorkspace=await readTaskWorkspace(runtime,{projectId:task.projectId,taskId:task.id});if(taskWorkspace&&!task.workDirectory)return taskWorkspace.directory;
   const worktree=await taskWorktreeBinding(runtime,task,repo);if(worktree)return worktree.directory;
   const configured=await configuredProjectWorkspace(runtime,task.projectId);
   if(configured&&!task.workDirectory){

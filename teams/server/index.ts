@@ -205,7 +205,7 @@ const server = createServer(async (request, response) => {
       if (path === '/api/collaboration') { json(200, await collaborationWrite(store, fixtures, body)); if(body.kind==='result.submit'){const node=body.input?.nodeId==='prepare'?'develop':body.input?.nodeId==='develop'?'verify':null;if(node)void taskPreparationService.scheduleNode({projectId:body.input.projectId,taskId:body.input.taskId},node).catch(error=>console.error('后续节点知识获取未完成：'+error.message));}return; }
       if (path === '/api/native/skill-apply') { if(process.env.DEMO_NATIVE_DISABLED==='1')throw new DomainError('此验证实例未开放原生用户目录写入',403); json(200,await skillApplications.apply(body.role,{projectId:body.projectId,resourceId:body.resourceId,version:body.version,sha256:body.sha256,requestId:body.requestId,planToken:body.planToken}));return; }
       if (path === '/api/native/terminal') { json(200, await terminalPreferences.select(body.terminal)); return; }
-      if (path === '/api/native/work-bind') { json(200, await work.bind(body.role, body.target, body.directory)); return; }
+      if (path === '/api/native/work-bind') { json(200, await work.bind(body.role, body.target, body.directory, body.mode === 'directory' ? 'directory' : 'auto')); return; }
       if (path === '/api/native/work-start') { json(200, await store.exclusive(async()=>work.start(body.role, { requestId: body.requestId, target: body.target, action: body.action, planToken: body.planToken, ...(body.mode!==undefined?{mode:body.mode}:{}), ...(body.instruction!==undefined?{instruction:body.instruction}:{}) }))); return; }
       if (path === '/api/native/context') { json(200, await writeContext(store.state)); return; }
       if(path==='/api/native/foundation'){json(200,await foundationSkill());return;}

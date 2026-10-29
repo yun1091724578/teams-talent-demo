@@ -89,7 +89,7 @@ test('preparation requires a configured directory and preserves exact assignee/e
   await service.bind('owner',target,ownerRepo);await service.bind('member',target,memberRepo);
   await assert.rejects(service.prepare('member',scope,preparation.id),/validated preparation transport reached/);assert.equal(calls.length,1);assert.equal(calls[0].directory,await realpath(memberRepo));
   task.workDirectory=join(dir,'explicit-missing');const missing=await service.prepare('member',scope,preparation.id);assert.equal(missing.status,'waiting-directory');assert.equal(calls.length,1);delete task.workDirectory;
-  await writeFile(join(dir,'project-work-bindings.json'),JSON.stringify({'owner:carddemo':ownerRepo,'member:carddemo':join(dir,'missing-member-binding')}));assert.equal((await service.plan('member',target)).directory.valid,false);
+  await writeFile(join(dir,'project-work-bindings.json'),JSON.stringify({'owner:carddemo':ownerRepo,'member:carddemo':join(dir,'missing-member-binding')}));await rm(join(dir,'task-workspaces.json'));assert.equal((await service.plan('member',target)).directory.valid,false);
   const teamScope={projectId:'teams',taskId:'REQ-'+randomUUID()};createDeliveryRequirement(state,'owner',{...teamScope,id:teamScope.taskId,title:'尚未绑定项目',description:'不使用其他项目的目录',assigneeId:'member'},at);queueTaskPreparation(state,teamScope,at);
   const queued=state.workspace.taskAutomation!.find(record=>record.taskId===teamScope.taskId)!.preparation!;queued.status='preparing-session';assert.equal((await service.prepare('member',teamScope,queued.id)).status,'waiting-directory');assert.equal(calls.length,1);
  }finally{await rm(dir,{recursive:true,force:true});}
