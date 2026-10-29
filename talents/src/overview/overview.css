@@ -1,0 +1,178 @@
+/* 总体规划页（overview.html 的正文）：原稿是独立的深色页面，这里改用 iCode Teams 的设计变量，跟随 Talents 的亮色 / 暗色主题。
+   原稿的颜色 / 间距变量名仍被片段里的内联样式引用，在 .overview-doc 上映射到 --ui-*。 */
+.overview-doc{
+  --c-text:var(--ui-color-text);--c-text-dim:var(--ui-color-muted);--text-muted:var(--ui-color-muted);
+  --c-accent:var(--ui-color-primary);--c-bg-2:var(--ui-color-surface-sunken);
+  --s-xs:4px;--s-sm:8px;--s-md:12px;--s-lg:16px;--s-xl:24px;--s-2xl:32px;
+  /* 图的语义色：主流程 = 主题紫，门 / 决策 / 回流 = 警示琥珀，研究 = 成功绿，业务 / 用户侧 = 信息蓝 */
+  --fig-main:var(--ui-color-primary);--fig-main-soft:var(--ui-color-primary-faint);
+  --fig-gate:var(--ui-color-warning);
+  --fig-ink:var(--ui-color-text);--fig-sub:var(--ui-color-text-secondary);--fig-dim:var(--ui-color-muted);--fig-line:var(--ui-color-faint);
+  --fig-box:var(--ui-color-surface);
+  font-size:var(--ui-font-size-body);line-height:1.75;color:var(--ui-color-text)
+}
+.overview-doc h2{font-size:19px;line-height:1.4;font-weight:600;margin:0 0 var(--s-lg);padding-bottom:var(--s-sm);border-bottom:1px solid var(--ui-color-divider)}
+.overview-doc h3{font-size:15px;line-height:1.5;font-weight:600;margin:var(--s-xl) 0 var(--s-sm)}
+.overview-doc h4{font-size:var(--ui-font-size-body);font-weight:600;margin:var(--s-lg) 0 var(--s-xs)}
+.overview-doc p{margin:0 0 var(--s-md)}
+.overview-doc strong{font-weight:600;color:var(--ui-color-text)}
+.overview-doc em{font-style:normal;color:var(--ui-color-warning)}
+.overview-doc a{color:var(--ui-color-primary)}
+.overview-doc a:hover{text-decoration:underline}
+.overview-doc code{font-family:var(--ui-font-family-mono);font-size:.9em;padding:1px 5px;border-radius:5px;background:var(--ui-color-fill);color:var(--ui-color-text-secondary);border:1px solid var(--ui-color-border)}
+.overview-doc ul,.overview-doc ol{margin:0 0 var(--s-md);padding-left:22px}
+.overview-doc li{margin-bottom:var(--s-xs)}
+.overview-doc small{color:var(--ui-color-muted)}
+
+/* 目录在右侧，随正文滚动保持可见；窄屏放到正文上方 */
+.overview-doc .layout{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:var(--s-xl);align-items:start}
+.overview-doc .shell{min-width:0;grid-column:1;grid-row:1}
+.overview-doc .rail{grid-column:2;grid-row:1;position:sticky;top:0;max-height:calc(100vh - 140px);overflow-y:auto}
+.overview-doc .rail__inner{padding:var(--s-md) var(--s-sm) var(--s-md) var(--s-md);border-left:1px solid var(--ui-color-divider)}
+.overview-doc .rail strong{display:block;margin-bottom:var(--s-sm);font-size:var(--ui-font-size-caption);color:var(--ui-color-muted);font-weight:600}
+.overview-doc .rail ul{list-style:none;margin:0;padding:0}
+.overview-doc .rail li{margin:0}
+.overview-doc .rail a{display:block;padding:3px 8px;margin-left:-9px;border-left:2px solid transparent;color:var(--ui-color-text-secondary);font-size:var(--ui-font-size-note);line-height:1.6}
+.overview-doc .rail a:hover{color:var(--ui-color-primary);text-decoration:none}
+.overview-doc .rail a.active{color:var(--ui-color-primary);border-left-color:var(--ui-color-primary);font-weight:600}
+.overview-doc .rail li.sep{border-top:1px solid var(--ui-color-divider);margin:var(--s-sm) 0}
+@media(max-width:1280px){
+  .overview-doc .layout{grid-template-columns:minmax(0,1fr)}
+  .overview-doc .rail{grid-column:1;position:static;max-height:none}
+  .overview-doc .shell{grid-row:2}
+  .overview-doc .rail__inner{border:1px solid var(--ui-color-border);border-radius:var(--ui-radius-card);padding:var(--s-md) var(--s-lg)}
+  .overview-doc .rail ul{columns:2 220px;column-gap:var(--s-xl)}
+  .overview-doc .rail li.sep{display:none}
+  .overview-doc .rail a{margin-left:0;border-left:0;padding:2px 0}
+}
+
+/* 每一节一张卡片，与 Talents 其他页面的分区卡片一致 */
+.overview-doc .shell section{background:var(--ui-color-surface);border:1px solid var(--ui-color-border);border-radius:var(--ui-radius-card);box-shadow:var(--ui-shadow-block);padding:var(--ui-block-padding-y) var(--ui-block-padding-x);margin-bottom:var(--ui-space-block)}
+.overview-doc section[id],.overview-doc h3[id]{scroll-margin-top:var(--s-md)}
+.overview-doc .lede{font-size:15px;color:var(--ui-color-text)}
+.overview-doc .src{font-size:var(--ui-font-size-note);color:var(--ui-color-muted)}
+.overview-doc .src code{font-size:.9em;color:var(--ui-color-muted);overflow-wrap:anywhere}
+.overview-doc td.src code{display:inline-block;margin:2px 0}
+.overview-doc code.nw{white-space:nowrap}
+
+.overview-doc .callout{background:var(--ui-color-primary-faint);border-left:3px solid var(--ui-color-primary);border-radius:var(--ui-radius);padding:var(--s-md) var(--s-lg);margin:var(--s-lg) 0}
+.overview-doc .callout.warn{background:var(--ui-color-warning-soft);border-left-color:var(--ui-color-warning)}
+.overview-doc .callout.danger{background:var(--ui-color-danger-soft);border-left-color:var(--ui-color-danger)}
+.overview-doc .callout.success{background:var(--ui-color-success-soft);border-left-color:var(--ui-color-success)}
+.overview-doc .callout__label{font-weight:600;margin-bottom:var(--s-xs);color:var(--ui-color-primary)}
+.overview-doc .callout.warn .callout__label{color:var(--ui-color-warning)}
+.overview-doc .callout.danger .callout__label{color:var(--ui-color-danger)}
+.overview-doc .callout.success .callout__label{color:var(--ui-color-success)}
+.overview-doc .callout ul{margin-top:var(--s-xs)}
+
+.overview-doc table{width:100%;border-collapse:collapse;margin:var(--s-lg) 0;font-size:var(--ui-font-size-note);line-height:1.65}
+.overview-doc thead{background:var(--ui-color-surface-sunken)}
+.overview-doc th,.overview-doc td{padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ui-color-divider)}
+.overview-doc th{font-weight:600;color:var(--ui-color-muted);white-space:nowrap}
+.overview-doc tbody tr:hover{background:var(--ui-color-primary-ghost)}
+.overview-doc .table-wrap{overflow-x:auto;margin:var(--s-lg) 0;border:1px solid var(--ui-color-border);border-radius:var(--ui-radius)}
+.overview-doc .table-wrap table{margin:0}
+.overview-doc .table-wrap tbody tr:last-child td{border-bottom:0}
+.overview-doc .table-wrap table.wide{min-width:720px}
+.overview-doc .table-wrap table.fixed{table-layout:fixed}
+
+.overview-doc .grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--s-md);margin:var(--s-lg) 0}
+.overview-doc .card{background:var(--ui-color-surface-sunken);border:1px solid var(--ui-color-border);border-radius:var(--ui-radius-card);padding:var(--s-md) var(--s-lg)}
+.overview-doc .card h4{margin-top:0;color:var(--ui-color-primary)}
+.overview-doc .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--s-md);margin:var(--s-lg) 0}
+.overview-doc .steps .card h4{margin-bottom:var(--s-xs)}
+.overview-doc .steps .card p{margin-bottom:0;font-size:var(--ui-font-size-note)}
+.overview-doc .steps .card.gate{border-top:3px solid var(--ui-color-warning)}
+.overview-doc .steps .card.gate h4{color:var(--ui-color-warning)}
+
+.overview-doc .rank-list{list-style:none;margin:var(--s-lg) 0;padding:0;counter-reset:rank}
+.overview-doc .rank-list>li{counter-increment:rank;position:relative;border:1px solid var(--ui-color-border);border-radius:var(--ui-radius-card);padding:var(--s-md) var(--s-lg) var(--s-md) 52px;margin-bottom:var(--s-sm)}
+.overview-doc .rank-list>li::before{content:counter(rank);position:absolute;left:var(--s-lg);top:var(--s-md);width:24px;height:24px;border-radius:50%;text-align:center;line-height:24px;font-size:var(--ui-font-size-caption);font-weight:700;color:var(--ui-color-primary);background:var(--ui-color-primary-soft)}
+.overview-doc .rank-list>li p{margin-bottom:var(--s-xs)}
+.overview-doc .rank-list>li ul{margin-bottom:0}
+
+.overview-doc td.q{font-family:var(--ui-font-family-mono);font-size:var(--ui-font-size-caption);color:var(--ui-color-text-secondary)}
+.overview-doc span.q{font-family:var(--ui-font-family-mono);font-size:.92em;color:var(--ui-color-text-secondary)}
+.overview-doc blockquote.q{margin:var(--s-md) 0;padding:var(--s-sm) var(--s-md);border-left:3px solid var(--ui-color-warning);background:var(--ui-color-warning-soft);border-radius:var(--ui-radius);font-family:var(--ui-font-family-mono);font-size:var(--ui-font-size-note);color:var(--ui-color-text-secondary)}
+.overview-doc blockquote.q span{font-family:var(--ui-font-family)}
+.overview-doc .tr{font-family:var(--ui-font-family);color:var(--ui-color-muted);font-size:var(--ui-font-size-caption)}
+
+/* 图：白底卡片，窄屏横向滚动，保留图内文字的可读字号 */
+.overview-doc figure{margin:var(--s-xl) 0}
+.overview-doc .figframe{background:var(--ui-color-surface);border:1px solid var(--ui-color-border);border-radius:var(--ui-radius-card);padding:var(--s-lg);overflow-x:auto}
+.overview-doc figure svg{display:block;width:100%;height:auto;max-width:100%;color:var(--ui-color-text);font-family:var(--ui-font-family)}
+.overview-doc figure svg text{fill:var(--fig-ink)}
+.overview-doc figcaption{margin-top:var(--s-sm);font-size:var(--ui-font-size-note);color:var(--ui-color-muted);text-align:center;line-height:1.7}
+.overview-doc figcaption strong,.overview-doc figcaption b{color:var(--ui-color-text-secondary)}
+
+/* 开篇四问的内联图 */
+.overview-doc figure svg.ifig{min-width:960px}
+.overview-doc .ifig .bx{fill:var(--fig-box);stroke:var(--fig-main);stroke-width:2}
+.overview-doc .ifig .bx-g{fill:var(--fig-box);stroke:var(--fig-gate);stroke-width:2.4}
+.overview-doc .ifig .bx-gd{fill:var(--fig-box);stroke:var(--fig-gate);stroke-width:2;stroke-dasharray:7 5}
+.overview-doc .ifig .bx-soft{fill:var(--fig-main-soft);stroke:var(--fig-main);stroke-width:1.5}
+.overview-doc .ifig .zone{fill:none;stroke:var(--fig-main);stroke-width:2;stroke-dasharray:9 6}
+.overview-doc .ifig .ln{stroke:var(--fig-main);stroke-width:2.2;fill:none}
+.overview-doc .ifig .ln-d{stroke:var(--fig-main);stroke-width:2;fill:none;stroke-dasharray:7 5}
+.overview-doc .ifig .ln-g{stroke:var(--fig-gate);stroke-width:2.4;fill:none}
+.overview-doc .ifig .ln-gd{stroke:var(--fig-gate);stroke-width:2;fill:none;stroke-dasharray:7 5}
+.overview-doc .ifig .ah{fill:var(--fig-main)}
+.overview-doc .ifig .ah-g{fill:var(--fig-gate)}
+.overview-doc .ifig .t-h{fill:var(--fig-main);font-size:17px;font-weight:700}
+.overview-doc .ifig .t-hg{fill:var(--fig-gate);font-size:17px;font-weight:700}
+.overview-doc .ifig .t{fill:var(--fig-ink);font-size:15px}
+.overview-doc .ifig .t-b{fill:var(--fig-ink);font-size:15px;font-weight:600}
+.overview-doc .ifig .t-big{fill:var(--fig-ink);font-size:18px;font-weight:700}
+.overview-doc .ifig .t-d{fill:var(--fig-dim);font-size:14px}
+.overview-doc .ifig .t-g{fill:var(--fig-gate);font-size:15px;font-weight:600}
+.overview-doc .ifig .t-m{fill:var(--fig-main);font-size:15px;font-weight:600}
+
+/* 图 4 完整框架：绿 = 偏研究，灰 = 偏工程，蓝 = 业务 / 用户侧 */
+.overview-doc .sv-framework-domain-label{font-size:13px;font-weight:700;fill:var(--fig-dim)}
+.overview-doc .sv-framework-module-title{font-size:11px;font-weight:650;fill:var(--fig-ink)}
+.overview-doc .sv-framework-module-desc{font-size:10px;fill:var(--fig-sub)}
+.overview-doc .sv-framework-team-label{font-size:9px;font-weight:600;letter-spacing:.05em;fill:var(--fig-dim)}
+.overview-doc .sv-framework-research-box{fill:var(--ui-color-success-soft);stroke:var(--ui-color-success);stroke-width:2}
+.overview-doc .sv-framework-engineering-box{fill:var(--ui-color-surface-sunken);stroke:var(--fig-line);stroke-width:1.5}
+.overview-doc .sv-framework-business-box{fill:var(--ui-color-info-soft);stroke:var(--ui-color-info);stroke-width:2}
+.overview-doc .sv-framework-arrow{stroke:var(--fig-line);stroke-width:2;fill:none;marker-end:url(#sv-framework-arrow-tip)}
+.overview-doc .sv-framework-backflow{stroke:var(--fig-gate);stroke-width:2;stroke-dasharray:6 4;fill:none;marker-end:url(#sv-framework-arrow-tip-orange)}
+
+/* 图 5 场景与挑战的映射 */
+.overview-doc .sv-scenario-challenge-mapping-scene-box{fill:var(--fig-box);stroke:var(--fig-main);stroke-width:2}
+.overview-doc .sv-scenario-challenge-mapping-scene-title{fill:var(--fig-main);font-weight:600;font-size:14px}
+.overview-doc .sv-scenario-challenge-mapping-scene-text{fill:var(--fig-sub);font-size:12px}
+.overview-doc .sv-scenario-challenge-mapping-challenge-core{fill:var(--fig-main-soft);stroke:var(--fig-main);stroke-width:2}
+.overview-doc .sv-scenario-challenge-mapping-challenge-title-core{fill:var(--fig-main);font-weight:600;font-size:13px}
+.overview-doc .sv-scenario-challenge-mapping-challenge-desc{fill:var(--fig-dim);font-size:11px}
+.overview-doc .sv-scenario-challenge-mapping-line-main{stroke:var(--fig-main);stroke-width:2.5;fill:none}
+.overview-doc .sv-scenario-challenge-mapping-line-secondary{stroke:var(--fig-main);stroke-width:1.5;fill:none;opacity:.5;stroke-dasharray:4,3}
+.overview-doc .sv-scenario-challenge-mapping-header-text{fill:var(--fig-ink);font-size:18px;font-weight:600}
+.overview-doc .sv-scenario-challenge-mapping-subheader-text{fill:var(--fig-dim);font-size:13px}
+.overview-doc .sv-scenario-challenge-mapping-section-label{fill:var(--fig-main);font-size:14px;font-weight:600}
+.overview-doc .sv-scenario-challenge-mapping-note-box{fill:var(--fig-box);stroke:var(--fig-main);stroke-width:1}
+.overview-doc .sv-scenario-challenge-mapping-note-text{fill:var(--fig-sub);font-size:12px}
+
+/* 图 6 完整演进闭环：紫 = 主流程，橙 = 决策 */
+.overview-doc .sv-evolution-loop-detailed-box-stage{fill:var(--fig-box);stroke:var(--fig-main);stroke-width:2.2}
+.overview-doc .sv-evolution-loop-detailed-box-decision{fill:var(--fig-box);stroke:var(--fig-gate);stroke-width:3}
+.overview-doc .sv-evolution-loop-detailed-text-title{fill:var(--fig-main);font-size:14px;font-weight:700}
+.overview-doc .sv-evolution-loop-detailed-text-subtitle{fill:var(--fig-gate);font-size:13px;font-weight:650}
+.overview-doc .sv-evolution-loop-detailed-text-main{fill:var(--fig-ink);font-size:12px;font-weight:600}
+.overview-doc .sv-evolution-loop-detailed-text-detail{fill:var(--fig-dim);font-size:11px}
+.overview-doc .sv-evolution-loop-detailed-arrow{stroke:var(--fig-main);stroke-width:2.5;fill:none;marker-end:url(#sv-evolution-loop-detailed-arrow)}
+.overview-doc .sv-evolution-loop-detailed-arrow-feedback{stroke:var(--fig-gate);stroke-width:2.2;stroke-dasharray:6,4;fill:none;marker-end:url(#sv-evolution-loop-detailed-arrow-feedback)}
+.overview-doc .sv-evolution-loop-detailed-arrow-loop{stroke:var(--fig-main);stroke-width:2.5;stroke-dasharray:6,4;fill:none;marker-end:url(#sv-evolution-loop-detailed-arrow)}
+
+/* 原稿在图里直接写的深色色值（fill / stroke 属性），按语义改成主题变量；CSS 规则优先于 SVG 的展示属性 */
+.overview-doc svg [fill="#55c2ba"]{fill:var(--fig-main)}
+.overview-doc svg [stroke="#55c2ba"]{stroke:var(--fig-main)}
+.overview-doc svg [fill="#06B6D4"]{fill:var(--ui-color-info)}
+.overview-doc svg [fill="#10B981"]{fill:var(--ui-color-success)}
+.overview-doc svg [fill="#F59E0B"],.overview-doc svg [fill="#d5a94a"]{fill:var(--fig-gate)}
+.overview-doc svg [fill="#9CA3AF"],.overview-doc svg [fill="#9fb1b8"]{fill:var(--fig-dim)}
+.overview-doc svg [fill="#D1D5DB"]{fill:var(--fig-sub)}
+.overview-doc svg [fill="#dde7ea"]{fill:var(--fig-ink)}
+.overview-doc svg [fill="#0d1519"],.overview-doc svg [fill="#0f131c"]{fill:var(--fig-box)}
+.overview-doc svg [fill="#1a252a"]{fill:var(--ui-color-surface-sunken)}
+.overview-doc svg [stroke="#6B7280"]{stroke:var(--fig-line)}
